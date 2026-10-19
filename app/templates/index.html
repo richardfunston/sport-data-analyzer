@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Upload · Sport Data Analyzer{% endblock %}
+
+{% block content %}
+<h1>Upload a session</h1>
+<p class="subtitle">
+  Drop a Wahoo <code>.fit</code> file here or pick one from your phone. Every
+  file gets its own report page with the full paddling breakdown.
+</p>
+
+<div class="card">
+  <div class="dropzone" id="dropzone" data-upload-url="{{ url_for('sda.upload') }}">
+    <div class="big">Choose .fit files</div>
+    <div class="hint">or drag them onto this box</div>
+    <label class="btn" for="file-input">Select files</label>
+    <input id="file-input" type="file" name="files" accept=".fit,application/octet-stream" multiple>
+  </div>
+
+  <div class="progress" id="progress">
+    <div class="progress-bar"><i id="progress-fill"></i></div>
+    <div class="progress-label" id="progress-label">Uploading…</div>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<div class="card">
+  <h2>Sessions{% if count %} <span class="subtitle" style="margin:0">({{ count }})</span>{% endif %}</h2>
+
+  {% if activities %}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Sport</th>
+            <th>Distance</th>
+            <th>Time</th>
+            <th>Avg</th>
+            <th>Max</th>
+            <th>Avg HR</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for a in activities %}
+          <tr>
+            <td><a href="{{ url_for('sda.activity', activity_id=a.id) }}">{{ a.start_time | daytime }}</a></td>
+            <td>{{ (a.sub_sport if a.sub_sport and a.sub_sport != 'generic' else a.sport) | title }}</td>
+            <td>{{ a.distance_m | distance }}</td>
+            <td>{{ a.moving_s | hms }}</td>
+            <td>{{ a.avg_speed_ms | speed }}</td>
+            <td>{{ a.max_speed_ms | speed }}</td>
+            <td>{{ a.avg_hr | number }}</td>
+            <td><a href="{{ url_for('sda.download', activity_id=a.id) }}">fit</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No sessions yet — upload your first <code>.fit</code> file above.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}

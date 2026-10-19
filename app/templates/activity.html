@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ record.start_time | short_date }} · {{ record.filename }}{% endblock %}
+
+{% block content %}
+<h1 id="report-title">Session report</h1>
+<p class="subtitle" id="report-subtitle">Loading…</p>
+
+<div class="card">
+  <h3>Overall</h3>
+  <div class="stat-grid" id="stat-grid"></div>
+</div>
+
+<div class="card">
+  <h2>Speed distribution</h2>
+  <p class="subtitle" id="hist-note"></p>
+  <div class="chart-box hist"><canvas id="histogram"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Speed trace</h2>
+  <div class="legend">
+    <span><i style="background:#4a6b85"></i>instantaneous</span>
+    <span><i style="background:#2fd4c4"></i><span id="rolling-legend"></span></span>
+  </div>
+  <div class="chart-box line"><canvas id="speed-trace"></canvas></div>
+</div>
+
+<div class="card" id="hr-card" hidden>
+  <h2>Heart rate</h2>
+  <div class="chart-box line"><canvas id="hr-trace"></canvas></div>
+</div>
+
+<div class="card" id="elev-card" hidden>
+  <h2>Elevation</h2>
+  <div class="chart-box small"><canvas id="elev-trace"></canvas></div>
+</div>
+
+<div class="card" id="splits-card" hidden>
+  <h2>Splits</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Split</th><th>Time</th><th>Avg speed</th><th>Pace</th><th>Max speed</th><th>Avg HR</th></tr>
+      </thead>
+      <tbody id="splits-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" id="track-card" hidden>
+  <h2>Track</h2>
+  <svg class="track" id="track" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="GPS track outline"></svg>
+  <p class="subtitle" id="track-note" style="margin:10px 0 0"></p>
+</div>
+
+<div class="card">
+  <h3>File</h3>
+  <div class="actions">
+    <a class="btn ghost small" href="{{ url_for('sda.download', activity_id=record.id) }}">Download original .fit</a>
+    <button class="btn ghost small" id="delete-btn"
+            data-delete-url="{{ url_for('sda.delete', activity_id=record.id) }}"
+            data-home-url="{{ url_for('sda.index') }}">Delete session</button>
+  </div>
+  <p class="subtitle" id="file-note" style="margin:12px 0 0"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script id="report-data" type="application/json">{{ report | tojson }}</script>
+<script src="{{ url_for('static', filename='js/report.js') }}"></script>
+{% endblock %}

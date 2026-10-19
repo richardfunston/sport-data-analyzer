@@ -1,0 +1,23 @@
+[project]
+name = "sport-data-analyzer"
+version = "1.0.0"
+description = "Upload Wahoo/Garmin .fit files from your phone and get a full paddling-session report."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "Flask>=3.0,<4.0",
+    "fitdecode>=0.10,<1.0",
+    "gunicorn>=21.2,<24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "fit_tool>=0.9",   # only needed to regenerate tests/fixtures/canoe-session.fit
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

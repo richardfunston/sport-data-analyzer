@@ -1,0 +1,30 @@
+[Unit]
+Description=Sport Data Analyzer (FIT upload + session reports)
+Documentation=https://github.com/richardfunston/sport-data-analyzer
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/sport-data-analyzer
+Environment=SDA_DATA_DIR=/var/lib/sport-data-analyzer
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sport-data-analyzer/.venv/bin/gunicorn \
+    --workers 2 \
+    --bind 127.0.0.1:8090 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    wsgi:application
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

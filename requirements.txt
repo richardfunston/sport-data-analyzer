@@ -1,0 +1,3 @@
+Flask>=3.0,<4.0
+fitdecode>=0.10,<1.0
+gunicorn>=21.2,<24.0

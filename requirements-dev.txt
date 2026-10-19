@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8.0
+# Only needed to regenerate tests/fixtures/canoe-session.fit
+fit_tool>=0.9

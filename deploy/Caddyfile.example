@@ -1,0 +1,20 @@
+# Caddy site block for web01.
+#
+# The app is mounted at /sport/ so it shares port 80 with whatever else the
+# container already serves. handle_path strips the prefix before proxying, and
+# X-Forwarded-Prefix tells Flask to generate prefixed links.
+
+:80 {
+	# /sport without the trailing slash would fall through to the catch-all
+	redir /sport /sport/ 308
+
+	handle_path /sport/* {
+		reverse_proxy 127.0.0.1:8090 {
+			header_up X-Forwarded-Prefix /sport
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+}
