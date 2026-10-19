@@ -56,12 +56,23 @@ const INITIALLY_HIDDEN = new Set([
   "track-card",
 ]);
 
+// Ordered log of visibility changes and map construction, so the harness can
+// assert *when* things happened, not just that they happened. A map handed a
+// display:none container initialises "successfully" and then never loads a
+// tile, which no state-only check can see.
+const events = [];
+
 function makeElement(id) {
+  let hidden = INITIALLY_HIDDEN.has(id);
   return {
     id,
     textContent: "",
     innerHTML: "",
-    hidden: INITIALLY_HIDDEN.has(id),
+    get hidden() { return hidden; },
+    set hidden(value) {
+      if (hidden !== value) events.push((value ? "hide:" : "show:") + id);
+      hidden = value;
+    },
     value: "",
     dataset: {},
     style: {},
@@ -92,6 +103,9 @@ global.document = {
 
 global.window = { confirm: () => false, alert: () => {}, location: {} };
 global.fetch = () => Promise.resolve({ ok: true });
+// Run frame callbacks immediately: the harness is single-threaded and just
+// needs the deferred work to happen.
+global.requestAnimationFrame = (fn) => { fn(); return 1; };
 
 function Chart(element, config) {
   // Mirror enough of the real Chart.js instance that report.js can hold a
@@ -110,7 +124,7 @@ global.Chart = Chart;
 // Leaflet stub. Set NO_LEAFLET=1 to exercise the offline SVG fallback instead.
 const withLeaflet = !process.env.NO_LEAFLET;
 const leaflet = {
-  calls: { container: null, tiles: [], removed: [], polylines: [], markers: [], fitBounds: 0, invalidateSize: 0 },
+  calls: { container: null, tiles: [], removed: [], polylines: [], markers: [], tileEvents: [], fitBounds: 0, invalidateSize: 0 },
 };
 
 if (withLeaflet) {
@@ -120,9 +134,19 @@ if (withLeaflet) {
     invalidateSize() { leaflet.calls.invalidateSize += 1; },
   };
   global.L = {
-    map(container) { leaflet.calls.container = container.id; return mapObject; },
+    map(container) {
+      // Recorded so the ordering checks can prove the container was visible.
+      events.push("map:init");
+      leaflet.calls.container = container.id;
+      return mapObject;
+    },
     tileLayer(url, options) {
-      return { url, options, addTo() { leaflet.calls.tiles.push(url); return this; } };
+      return {
+        url,
+        options,
+        on(type, handler) { leaflet.calls.tileEvents.push(type); return this; },
+        addTo() { leaflet.calls.tiles.push(url); return this; },
+      };
     },
     polyline(points, options) {
       leaflet.calls.polylines.push({ points: points.length, options });
@@ -250,6 +274,7 @@ check("splits table shows pace", /\/km/.test(html("splits-body")));
 /* ------------------------- route map / basemaps -------------------------- */
 
 console.log("\nroute map (" + (withLeaflet ? "leaflet" : "offline SVG fallback") + "):");
+console.log("  visibility / init order: " + events.join(" -> "));
 
 const catalogue = JSON.parse(basemapSource);
 const basemapKeys = catalogue.map((b) => b.key);
@@ -259,6 +284,22 @@ check("a basemap button exists per provider",
   basemapKeys.join(", "));
 
 if (withLeaflet) {
+  // Ordering matters: Leaflet must be handed a laid-out container, or it
+  // measures 0x0 and silently never requests a tile.
+  const initAt = events.indexOf("map:init");
+  const cardShownAt = events.indexOf("show:track-card");
+  const mapShownAt = events.indexOf("show:map");
+
+  check("the route card is visible before Leaflet measures the container",
+    initAt !== -1 && cardShownAt !== -1 && cardShownAt < initAt,
+    events.join(" -> "));
+  check("the map container is visible before Leaflet measures it",
+    initAt !== -1 && mapShownAt !== -1 && mapShownAt < initAt,
+    events.join(" -> "));
+  check("tile failures are watched for diagnostics",
+    leaflet.calls.tileEvents.filter((t) => t === "tileerror").length >= 1,
+    leaflet.calls.tileEvents.join(", ") || "no tile events");
+
   check("map attached to the route container",
     leaflet.calls.container === "map", String(leaflet.calls.container));
   check("map container revealed", element("map").hidden === false);
@@ -297,6 +338,10 @@ if (withLeaflet) {
 }
 
 check("track note reports point count", /GPS points/.test(text("track-note")), text("track-note"));
+check("route note adapts to the map being used",
+  withLeaflet ? /change the background/.test(text("track-note"))
+              : /plotted/.test(text("track-note")),
+  text("track-note"));
 
 check("file note reports sample counts", /samples recorded/.test(text("file-note")), text("file-note"));
 

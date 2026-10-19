@@ -283,6 +283,15 @@ tbody tr:hover { background: var(--panel-2); }
   overflow: hidden;
 }
 
+/* Leaflet hardcodes a light grey canvas on .leaflet-container, which wins on
+   equal specificity and shows as a bright block before tiles arrive (or if they
+   never do). Match the app palette instead. */
+.map.leaflet-container {
+  background: var(--panel-2);
+  font-family: inherit;
+  font-size: inherit;
+}
+
 .map .leaflet-control-attribution {
   background: rgba(10, 17, 25, 0.78);
   color: var(--muted);

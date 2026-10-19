@@ -490,6 +490,8 @@
     container.hidden = false;
     var map = L.map(container, { scrollWheelZoom: false, zoomControl: true });
 
+    var tileProblem = false;
+
     var layers = {};
     catalogue.forEach(function (base) {
       layers[base.key] = L.tileLayer(base.url, {
@@ -497,6 +499,18 @@
         maxZoom: base.max_zoom,
         subdomains: base.subdomains || "abc",
       });
+      // Diagnostics: a device that is on the LAN but off the internet can reach
+      // the app and not the tiles. Say so instead of showing a blank canvas.
+      if (typeof layers[base.key].on === "function") {
+        layers[base.key].on("tileerror", function () {
+          if (tileProblem) return;
+          tileProblem = true;
+          var note = document.getElementById("track-note");
+          if (note) {
+            note.textContent += " · map tiles unreachable, route shown on a plain background";
+          }
+        });
+      }
     });
 
     var current = catalogue[0].key;
@@ -511,7 +525,15 @@
     }).bindTooltip("Finish").addTo(map);
 
     map.fitBounds(L.latLngBounds(latlngs), { padding: [22, 22] });
-    map.invalidateSize();
+
+    // Re-measure once the browser has laid the card out. Defensive only: the
+    // caller has already made the container visible, which is the part that
+    // actually matters.
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () { map.invalidateSize(); });
+    } else {
+      map.invalidateSize();
+    }
 
     function activate(key) {
       if (key === current || !layers[key]) return;
@@ -542,8 +564,15 @@
   if (track.length > 1) {
     var mapEl = document.getElementById("map");
     var svgEl = document.getElementById("track");
-    var usedMap = false;
 
+    // Reveal the card BEFORE Leaflet is handed the container. A display:none
+    // ancestor gives the map a 0x0 viewport, so Leaflet computes an empty tile
+    // range and asks for nothing - and calling invalidateSize() while the card
+    // is still hidden just recomputes 0x0. The symptom is a map that draws its
+    // zoom control and attribution but never fetches a single tile.
+    document.getElementById("track-card").hidden = false;
+
+    var usedMap = false;
     try {
       usedMap = mapEl ? renderLeafletTrack(mapEl) : false;
     } catch (err) {
@@ -551,13 +580,12 @@
       if (mapEl) mapEl.hidden = true;
     }
 
-    if (!usedMap && svgEl) {
-      renderSvgTrack(svgEl);
+    if (!usedMap) {
+      if (svgEl) renderSvgTrack(svgEl);
       var control = document.getElementById("basemap-control");
       if (control) control.hidden = true;
     }
 
-    document.getElementById("track-card").hidden = false;
     document.getElementById("track-note").textContent =
       "Green dot: start · amber dot: finish · " + track.length + " GPS points" +
       (usedMap ? " · tap the buttons above to change the background" : " plotted");
