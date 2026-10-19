@@ -62,9 +62,62 @@ SUB_SPORT_NAMES: dict[int, str] = {
     127: 'e_bike_enduro', 254: 'all',
 }
 
-#: Sports that are paddled - used to pick sensible wording on the report.
+#: Sports that happen on water. Everything here is paddled, rowed, sailed,
+#: motored or swum - i.e. the surface is not ground, so altitude readings are
+#: GPS and barometer noise rather than terrain.
+WATER_SPORTS = frozenset(
+    {
+        "canoeing",
+        "kayaking",
+        "paddling",
+        "rowing",
+        "stand_up_paddleboarding",
+        "rafting",
+        "swimming",
+        "diving",
+        "snorkeling",
+        "sailing",
+        "boating",
+        "surfing",
+        "wakeboarding",
+        "wakesurfing",
+        "water_skiing",
+        "water_tubing",
+        "water_sport",
+        "windsurfing",
+        "kitesurfing",
+    }
+)
+
+#: Sub-sports that put a session on water even when the parent sport does not
+#: say so - a "generic" recording of an open-water swim, for instance.
+WATER_SUB_SPORTS = frozenset(
+    {
+        "lap_swimming",
+        "open_water",
+        "whitewater",
+        "sail_race",
+        "trolling_motor",
+        "single_gas_diving",
+        "multi_gas_diving",
+        "gauge_diving",
+        "apnea_diving",
+        "apnea_hunting",
+        "ccr_diving",
+        "dynamic_apnea",
+    }
+)
+
+#: Water sports driven by a paddle rather than a motor, sail or fins.
 PADDLING_SPORTS = frozenset(
-    {"canoeing", "kayaking", "paddling", "rowing", "stand_up_paddleboarding", "rafting"}
+    {
+        "canoeing",
+        "kayaking",
+        "paddling",
+        "rowing",
+        "stand_up_paddleboarding",
+        "rafting",
+    }
 )
 
 
@@ -92,6 +145,17 @@ def sub_sport_name(value: Any) -> str | None:
 
 def is_paddling(sport: str | None) -> bool:
     return bool(sport) and sport in PADDLING_SPORTS
+
+
+def is_water_sport(sport: str | None, sub_sport: str | None = None) -> bool:
+    """True when the session happened on water rather than on land.
+
+    Checks the sub-sport as well: some devices record an open-water swim or a
+    whitewater run under a generic parent sport.
+    """
+    if sport and sport in WATER_SPORTS:
+        return True
+    return bool(sub_sport) and sub_sport in WATER_SUB_SPORTS
 
 
 def title(value: str | None) -> str:

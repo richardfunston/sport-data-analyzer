@@ -16,6 +16,7 @@ from flask import (
 )
 
 from .analysis import REPORT_VERSION, build_report
+from .basemaps import BASEMAPS
 from .fitio import FitError, parse_fit
 
 bp = Blueprint("sda", __name__)
@@ -113,7 +114,9 @@ def activity(activity_id: str):
     if report is None:
         abort(404, description="no such activity")
 
-    return render_template("activity.html", record=record, report=report)
+    return render_template(
+        "activity.html", record=record, report=report, basemaps=BASEMAPS
+    )
 
 
 @bp.get("/a/<activity_id>/download")

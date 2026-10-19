@@ -73,6 +73,8 @@ def test_report_page_embeds_the_payload(client, canoe_fit):
     payload = json.loads(match.group(1))
     assert payload["meta"]["sport"] == "canoeing"
     assert payload["is_paddling"] is True
+    assert payload["is_water_sport"] is True
+    assert payload["show_elevation"] is False
     assert payload["summary"]["distance_m"] > 4000
     assert len(payload["histogram"]["bins"]) == 24
     assert payload["trace"]["t"]
@@ -93,9 +95,15 @@ def test_report_page_renders_the_rolling_window_picker(client, canoe_fit):
 
     assert ">10 min</button>" in html
     assert ">30 s</button>" in html
-    # Exactly one option starts selected.
-    assert html.count('class="is-active"') == 1
-    assert html.count('aria-pressed="true"') == 1
+
+    # Exactly one option is selected - scoped to this control, since the page
+    # carries a second segmented control for the map background.
+    control = re.search(
+        r'<div class="segmented" id="rolling-control".*?</div>', html, re.S
+    ).group(0)
+    assert control.count('class="is-active"') == 1
+    assert control.count('aria-pressed="true"') == 1
+    assert "is-active" in re.search(r'id="window-30".*?>', control, re.S).group(0)
 
 
 def test_report_charts_are_downsampled_to_a_bounded_size(client, canoe_fit):
@@ -237,6 +245,56 @@ def test_static_assets_are_served(client):
     assert client.get("/static/js/report.js").status_code == 200
     assert client.get("/static/js/upload.js").status_code == 200
     assert client.get("/static/vendor/chart.umd.min.js").status_code == 200
+
+
+def test_leaflet_is_vendored(client):
+    assert client.get("/static/vendor/leaflet/leaflet.js").status_code == 200
+    assert client.get("/static/vendor/leaflet/leaflet.css").status_code == 200
+
+
+def test_report_page_renders_the_basemap_picker(client, canoe_fit):
+    from app.basemaps import BASEMAPS
+
+    activity_id = upload(client, canoe_fit).get_json()["results"][0]["id"]
+    html = client.get(f"/a/{activity_id}").data.decode()
+
+    for base in BASEMAPS:
+        assert f'id="basemap-{base["key"]}"' in html, base["key"]
+        assert f'data-basemap="{base["key"]}"' in html, base["key"]
+        assert base["label"] in html, base["key"]
+
+    assert 'id="basemap-data"' in html
+    assert 'id="map"' in html
+    assert 'id="track"' in html
+
+    import re as _re
+
+    control = _re.search(
+        r'<div class="segmented" id="basemap-control".*?</div>', html, _re.S
+    ).group(0)
+    assert control.count('data-basemap=') == len(BASEMAPS)
+    assert control.count('class="is-active"') == 1, "exactly one basemap starts selected"
+    assert "is-active" in _re.search(r'id="basemap-streets".*?>', control, _re.S).group(0)
+
+
+def test_basemap_catalogue_is_embedded_for_the_frontend(client, canoe_fit):
+    import re as _re
+
+    activity_id = upload(client, canoe_fit).get_json()["results"][0]["id"]
+    html = client.get(f"/a/{activity_id}").data.decode()
+
+    match = _re.search(
+        r'<script id="basemap-data" type="application/json">(.*?)</script>', html, _re.S
+    )
+    assert match, "basemap catalogue is not embedded"
+
+    catalogue = json.loads(match.group(1))
+    from app.basemaps import basemap_keys
+
+    assert [entry["key"] for entry in catalogue] == basemap_keys()
+    for entry in catalogue:
+        assert entry["url"].startswith("https://")
+        assert entry["attribution"]
 
 
 def test_upload_summary_matches_a_direct_parse(client, canoe_fit):

@@ -50,14 +50,18 @@ def client(app):
     return app.test_client()
 
 
-def activity(t, **series):
+def activity(t, sport="canoeing", sub_sport=None, **series):
     """Build a minimal activity dict for the analysis functions."""
     columns = {key: [None] * len(t) for key in SERIES_KEYS}
     columns["t"] = list(t)
     for key, values in series.items():
         columns[key] = list(values)
     return {
-        "meta": {"start_time": "2024-01-01T00:00:00+00:00", "sport": "canoeing"},
+        "meta": {
+            "start_time": "2024-01-01T00:00:00+00:00",
+            "sport": sport,
+            "sub_sport": sub_sport,
+        },
         "series": columns,
         "session": {},
     }

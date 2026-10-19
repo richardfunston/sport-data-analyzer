@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Any, Sequence
 
-from .profiles import is_paddling
+from .profiles import is_paddling, is_water_sport
 
 #: Speed at or below this counts as stationary (m/s). 0.5 m/s ~ 1.8 km/h.
 MOVING_SPEED_MS = 0.5
@@ -34,7 +34,7 @@ MAX_CHART_POINTS = 1200
 #: Bumped whenever a change to the analysis alters stored reports. Stored
 #: reports carrying an older version are rebuilt from the original .fit file
 #: the next time they are opened.
-REPORT_VERSION = 3
+REPORT_VERSION = 4
 
 
 def _deltas(t: Sequence[float]) -> list[float]:
@@ -469,11 +469,19 @@ def build_report(activity: dict[str, Any], max_points: int = MAX_CHART_POINTS) -
     ]
 
     summary = summarize(activity)
+    meta = activity["meta"]
+    on_water = is_water_sport(meta.get("sport"), meta.get("sub_sport"))
 
     return {
         "version": REPORT_VERSION,
-        "meta": activity["meta"],
-        "is_paddling": is_paddling(activity["meta"].get("sport")),
+        "meta": meta,
+        "is_paddling": is_paddling(meta.get("sport")),
+        "is_water_sport": on_water,
+        # On water the altitude trace is surface noise: waves, swell and GPS
+        # drift all read as climbing or descending. The panel is withheld for
+        # water sports. The statistics are still computed and stored - only the
+        # presentation changes, so a river trip can be put back with one flag.
+        "show_elevation": bool(summary["has_altitude"]) and not on_water,
         "summary": summary,
         "histogram": speed_histogram(t, speed),
         "trace": {

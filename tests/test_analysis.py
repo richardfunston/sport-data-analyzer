@@ -365,3 +365,77 @@ def test_rolling_windows_never_go_negative():
         values = [v for v in windows[str(window)] if v is not None]
         assert min(values) >= 0.0, window
         assert max(values) <= 4.0, window
+
+
+# --------------------------------------------------------------------------
+# elevation is withheld on water
+# --------------------------------------------------------------------------
+
+def _hilly(t):
+    return [10.0] * (len(t) // 2) + [30.0] * (len(t) - len(t) // 2)
+
+
+def test_elevation_is_withheld_for_a_water_sport():
+    t = [float(i) for i in range(40)]
+
+    report = build_report(
+        activity(t, sport="canoeing", speed=[2.0] * 40, altitude=_hilly(t))
+    )
+
+    assert report["is_water_sport"] is True
+    assert report["show_elevation"] is False
+    # The statistics are still computed - only the presentation is withheld.
+    assert report["summary"]["has_altitude"] is True
+    assert report["summary"]["ascent_m"] is not None
+
+
+@pytest.mark.parametrize(
+    "sport", ["canoeing", "kayaking", "paddling", "rowing", "swimming", "surfing"]
+)
+def test_every_water_sport_withholds_elevation(sport):
+    t = [float(i) for i in range(40)]
+
+    report = build_report(
+        activity(t, sport=sport, speed=[2.0] * 40, altitude=_hilly(t))
+    )
+
+    assert report["show_elevation"] is False, sport
+
+
+@pytest.mark.parametrize("sport", ["cycling", "running", "hiking"])
+def test_land_sports_still_show_elevation(sport):
+    t = [float(i) for i in range(40)]
+
+    report = build_report(
+        activity(t, sport=sport, speed=[2.0] * 40, altitude=_hilly(t))
+    )
+
+    assert report["is_water_sport"] is False
+    assert report["show_elevation"] is True, sport
+    assert report["summary"]["ascent_m"] > 0
+
+
+def test_elevation_is_hidden_when_there_is_no_altitude_data_at_all():
+    report = build_report(
+        activity([float(i) for i in range(20)], sport="cycling", speed=[2.0] * 20)
+    )
+
+    assert report["summary"]["has_altitude"] is False
+    assert report["show_elevation"] is False
+
+
+def test_a_water_sub_sport_withholds_elevation():
+    t = [float(i) for i in range(40)]
+
+    report = build_report(
+        activity(
+            t,
+            sport="generic",
+            sub_sport="open_water",
+            speed=[2.0] * 40,
+            altitude=_hilly(t),
+        )
+    )
+
+    assert report["is_water_sport"] is True
+    assert report["show_elevation"] is False

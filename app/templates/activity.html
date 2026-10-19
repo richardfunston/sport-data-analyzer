@@ -58,8 +58,19 @@
 </div>
 
 <div class="card" id="track-card" hidden>
-  <h2>Track</h2>
-  <svg class="track" id="track" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="GPS track outline"></svg>
+  <div class="card-head">
+    <h2>Route</h2>
+    <div class="segmented" id="basemap-control" role="group" aria-label="Map background">
+      {% for base in basemaps %}
+        <button type="button" id="basemap-{{ base.key }}" data-basemap="{{ base.key }}"
+                class="{{ 'is-active' if loop.first else '' }}"
+                aria-pressed="{{ 'true' if loop.first else 'false' }}"
+        >{{ base.label }}</button>
+      {% endfor %}
+    </div>
+  </div>
+  <div id="map" class="map" hidden></div>
+  <svg class="track" id="track" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="GPS track outline" hidden></svg>
   <p class="subtitle" id="track-note" style="margin:10px 0 0"></p>
 </div>
 
@@ -75,8 +86,14 @@
 </div>
 {% endblock %}
 
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+{% endblock %}
+
 {% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 <script id="report-data" type="application/json">{{ report | tojson }}</script>
+<script id="basemap-data" type="application/json">{{ basemaps | tojson }}</script>
 <script src="{{ url_for('static', filename='js/report.js') }}"></script>
 {% endblock %}

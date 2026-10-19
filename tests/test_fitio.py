@@ -5,7 +5,15 @@ from __future__ import annotations
 import pytest
 
 from app.fitio import SERIES_KEYS, FitError, parse_fit
-from app.profiles import is_paddling, sport_name, sub_sport_name, title
+from app.profiles import (
+    PADDLING_SPORTS,
+    WATER_SPORTS,
+    is_paddling,
+    is_water_sport,
+    sport_name,
+    sub_sport_name,
+    title,
+)
 
 
 def test_parses_a_canoeing_session(canoe_fit):
@@ -157,6 +165,63 @@ def test_is_paddling_recognises_canoe_sports():
     assert is_paddling("kayaking")
     assert not is_paddling("cycling")
     assert not is_paddling(None)
+
+
+# --------------------------------------------------------------------------
+# water sports
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "sport",
+    [
+        "canoeing",
+        "kayaking",
+        "paddling",
+        "rowing",
+        "stand_up_paddleboarding",
+        "rafting",
+        "swimming",
+        "diving",
+        "snorkeling",
+        "sailing",
+        "boating",
+        "surfing",
+        "wakeboarding",
+        "wakesurfing",
+        "water_skiing",
+        "water_tubing",
+        "water_sport",
+        "windsurfing",
+        "kitesurfing",
+    ],
+)
+def test_water_sports_are_recognised(sport):
+    assert is_water_sport(sport), sport
+
+
+@pytest.mark.parametrize(
+    "sport", ["cycling", "running", "walking", "hiking", "generic", "skiing"]
+)
+def test_land_sports_are_not_water_sports(sport):
+    assert not is_water_sport(sport), sport
+
+
+def test_a_missing_sport_is_not_a_water_sport():
+    assert not is_water_sport(None)
+    assert not is_water_sport(None, None)
+    assert not is_water_sport("")
+
+
+def test_a_water_sub_sport_puts_a_generic_session_on_water():
+    assert is_water_sport("generic", "open_water")
+    assert is_water_sport("generic", "whitewater")
+    assert is_water_sport("swimming", "lap_swimming")
+    assert not is_water_sport("cycling", "road")
+    assert not is_water_sport("running", "trail")
+
+
+def test_paddling_sports_are_a_subset_of_water_sports():
+    assert PADDLING_SPORTS <= WATER_SPORTS
 
 
 def test_title_formats_snake_case_sports():

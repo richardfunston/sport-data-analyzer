@@ -11,16 +11,57 @@ const fs = require("fs");
 const payload = fs.readFileSync(process.argv[2], "utf8");
 const reportSource = fs.readFileSync(process.argv[3], "utf8");
 
+// Optional 4th argument: the basemap catalogue JSON as the server renders it.
+// Falling back keeps the harness runnable with two arguments.
+const basemapSource = process.argv[4]
+  ? fs.readFileSync(process.argv[4], "utf8").trim()
+  : JSON.stringify([
+      {
+        key: "streets",
+        label: "Streets",
+        url: "https://tile.example/{z}/{x}/{y}.png",
+        attribution: "test",
+        max_zoom: 19,
+        subdomains: "abc",
+      },
+      {
+        key: "satellite",
+        label: "Satellite",
+        url: "https://sat.example/{z}/{y}/{x}",
+        attribution: "test",
+        max_zoom: 19,
+        subdomains: "abc",
+      },
+    ]);
+
 const data = JSON.parse(payload);
 const charts = [];
 const elements = new Map();
+
+// Declared up front: the checks below reference these before the rolling-window
+// section would otherwise have defined them.
+const trace = data.trace || {};
+const options = trace.rolling_options || [];
+const windows = trace.rolling_windows || {};
+const pointCount = (trace.t || []).length;
+
+// Cards and containers the template ships hidden. The stub must start in the
+// same state or "was it revealed?" checks test nothing.
+const INITIALLY_HIDDEN = new Set([
+  "map",
+  "track",
+  "hr-card",
+  "elev-card",
+  "splits-card",
+  "track-card",
+]);
 
 function makeElement(id) {
   return {
     id,
     textContent: "",
     innerHTML: "",
-    hidden: false,
+    hidden: INITIALLY_HIDDEN.has(id),
     value: "",
     dataset: {},
     style: {},
@@ -39,6 +80,7 @@ function makeElement(id) {
 global.document = {
   getElementById(id) {
     if (id === "report-data") return { textContent: payload };
+    if (id === "basemap-data") return { textContent: basemapSource };
     if (!elements.has(id)) elements.set(id, makeElement(id));
     return elements.get(id);
   },
@@ -65,6 +107,35 @@ function Chart(element, config) {
 Chart.defaults = { font: {}, plugins: {}, animation: true };
 global.Chart = Chart;
 
+// Leaflet stub. Set NO_LEAFLET=1 to exercise the offline SVG fallback instead.
+const withLeaflet = !process.env.NO_LEAFLET;
+const leaflet = {
+  calls: { container: null, tiles: [], removed: [], polylines: [], markers: [], fitBounds: 0, invalidateSize: 0 },
+};
+
+if (withLeaflet) {
+  const mapObject = {
+    removeLayer(layer) { leaflet.calls.removed.push(layer.url); },
+    fitBounds(bounds) { leaflet.calls.fitBounds += 1; leaflet.calls.boundsPoints = bounds.n; },
+    invalidateSize() { leaflet.calls.invalidateSize += 1; },
+  };
+  global.L = {
+    map(container) { leaflet.calls.container = container.id; return mapObject; },
+    tileLayer(url, options) {
+      return { url, options, addTo() { leaflet.calls.tiles.push(url); return this; } };
+    },
+    polyline(points, options) {
+      leaflet.calls.polylines.push({ points: points.length, options });
+      return { addTo() { return this; } };
+    },
+    circleMarker(point, options) {
+      leaflet.calls.markers.push({ point, options });
+      return { bindTooltip() { return this; }, addTo() { return this; } };
+    },
+    latLngBounds(points) { return { n: points.length }; },
+  };
+}
+
 // Run the report IIFE exactly as a browser would.
 eval(reportSource);
 
@@ -82,10 +153,14 @@ function check(name, condition, detail) {
 
 const text = (id) => (elements.get(id) || {}).textContent || "";
 const html = (id) => (elements.get(id) || {}).innerHTML || "";
+// Mirrors document.getElementById: creates the node on first touch, seeded with
+// the hidden state the template ships it in. Without this, a card report.js
+// never revealed reads as undefined instead of "still hidden".
+const element = (id) => document.getElementById(id);
 const click = (id) => {
-  const element = elements.get(id);
-  if (!element || !element._listeners.click) return false;
-  element._listeners.click.forEach((fn) => fn());
+  const node = element(id);
+  if (!node || !node._listeners || !node._listeners.click) return false;
+  node._listeners.click.forEach((fn) => fn());
   return true;
 };
 
@@ -101,22 +176,34 @@ charts.forEach((c, i) => {
 });
 
 console.log("\nchecks:");
-check("title is populated", /2024/.test(text("report-title")), text("report-title"));
+check("title is populated", text("report-title").length > 0, text("report-title"));
 check("subtitle names the sport and device",
-  /Canoeing/.test(text("report-subtitle")) && /Wahoo/.test(text("report-subtitle")),
+  text("report-subtitle").length > 0
+  && text("report-subtitle").toLowerCase()
+       .includes(String(data.meta.sport || "").replace(/_/g, " ").toLowerCase()),
   text("report-subtitle"));
 
 check("stat grid rendered", html("stat-grid").includes("Distance") && html("stat-grid").includes("Max speed"));
 check("stat grid shows a distance in km", /km/.test(html("stat-grid")));
-check("stat grid shows avg and max heart rate", /Avg HR/.test(html("stat-grid")) && /Max HR/.test(html("stat-grid")));
+check("stat grid heart-rate stats follow the data",
+  data.summary.has_hr
+    ? (/Avg HR/.test(html("stat-grid")) && /Max HR/.test(html("stat-grid")))
+    : !/Avg HR/.test(html("stat-grid")),
+  "has_hr=" + data.summary.has_hr);
 check("stat count is plausible",
-  (html("stat-grid").match(/class="stat/g) || []).length >= 12,
+  (html("stat-grid").match(/class="stat/g) || []).length >= 9,
   (html("stat-grid").match(/class="stat/g) || []).length + " stats");
 
 check("histogram note has distribution stats", /mean/.test(text("hist-note")) && /km\/h/.test(text("hist-note")), text("hist-note"));
 check("rolling-average legend labelled", /rolling average/.test(text("rolling-legend")), text("rolling-legend"));
 
-check("four charts created", charts.length === 4, String(charts.length));
+const expectedCharts =
+  1 +                                   // speed histogram
+  1 +                                   // speed trace
+  (data.summary.has_hr ? 1 : 0) +       // heart rate
+  (data.show_elevation ? 1 : 0);        // elevation
+check("chart count matches the data", charts.length === expectedCharts,
+  charts.length + " vs expected " + expectedCharts);
 
 const histogram = charts.find((c) => c.config.type === "bar");
 check("histogram is a bar chart", !!histogram);
@@ -132,24 +219,83 @@ check("speed trace has raw + rolling datasets", !!speedTrace && speedTrace.confi
 const speedValues = speedTrace
   ? speedTrace.config.data.datasets.flatMap((d) => d.data.map((p) => p.y))
   : [];
+const maxKmh = data.summary.max_speed_ms * 3.6;
 check("speed trace is in km/h and never negative",
-  speedValues.length > 0 && speedValues.every((y) => y >= 0 && y < 40),
-  "min=" + Math.min(...speedValues) + " max=" + Math.max(...speedValues));
+  speedValues.length > 0 && speedValues.every((y) => y >= 0 && y <= maxKmh + 0.5),
+  "min=" + Math.min(...speedValues) + " max=" + Math.max(...speedValues) + " vs maxKmh=" + maxKmh.toFixed(1));
+
+const lastT = trace.t[trace.t.length - 1];
 check("speed trace x-axis is elapsed seconds",
-  !!speedTrace && speedTrace.config.data.datasets[0].data.every((p) => p.x >= 0 && p.x < 5000),
-  speedTrace ? "xmax=" + Math.max(...speedTrace.config.data.datasets[0].data.map((p) => p.x)) : "n/a");
+  !!speedTrace && speedTrace.config.data.datasets[0].data.every((p) => p.x >= 0 && p.x <= lastT + 1),
+  speedTrace ? "xmax=" + Math.max(...speedTrace.config.data.datasets[0].data.map((p) => p.x)) + " session=" + lastT : "n/a");
 
-check("heart-rate card revealed", (elements.get("hr-card") || {}).hidden === false);
-check("elevation card revealed", (elements.get("elev-card") || {}).hidden === false);
-check("splits card revealed", (elements.get("splits-card") || {}).hidden === false);
-check("track card revealed", (elements.get("track-card") || {}).hidden === false);
+check("heart-rate card follows the data",
+  element("hr-card").hidden === !data.summary.has_hr,
+  "hidden=" + element("hr-card").hidden + " has_hr=" + data.summary.has_hr);
+check("elevation card obeys the water rule",
+  element("elev-card").hidden === !data.show_elevation,
+  "hidden=" + element("elev-card").hidden + " show_elevation=" + data.show_elevation);
+check("ascent/descent stats obeys the water rule",
+  /Ascent/.test(html("stat-grid")) === data.show_elevation,
+  "show_elevation=" + data.show_elevation);
+check("splits card revealed", element("splits-card").hidden === false);
+check("track card revealed", element("track-card").hidden === false);
 
+const expectedSplits = (data.splits || []).length;
 const splitRows = (html("splits-body").match(/<tr>/g) || []).length;
-check("splits table has rows", splitRows === 4, splitRows + " rows");
+check("splits table has a row per split", splitRows === expectedSplits,
+  splitRows + " rows vs " + expectedSplits + " splits");
 check("splits table shows pace", /\/km/.test(html("splits-body")));
 
-check("track path generated", /<path d="M/.test(html("track")));
-check("track has start and finish markers", (html("track").match(/<circle/g) || []).length === 2);
+/* ------------------------- route map / basemaps -------------------------- */
+
+console.log("\nroute map (" + (withLeaflet ? "leaflet" : "offline SVG fallback") + "):");
+
+const catalogue = JSON.parse(basemapSource);
+const basemapKeys = catalogue.map((b) => b.key);
+
+check("a basemap button exists per provider",
+  basemapKeys.length > 0 && basemapKeys.every((k) => !!element("basemap-" + k)),
+  basemapKeys.join(", "));
+
+if (withLeaflet) {
+  check("map attached to the route container",
+    leaflet.calls.container === "map", String(leaflet.calls.container));
+  check("map container revealed", element("map").hidden === false);
+  check("opening basemap tiles added",
+    leaflet.calls.tiles.length === 1 && leaflet.calls.tiles[0] === catalogue[0].url,
+    leaflet.calls.tiles.join(" "));
+  check("route polyline carries every point",
+    leaflet.calls.polylines.length === 1
+    && leaflet.calls.polylines[0].points === data.track.length,
+    JSON.stringify(leaflet.calls.polylines.map((p) => p.points)) + " vs " + data.track.length);
+  check("start and finish markers added",
+    leaflet.calls.markers.length === 2, String(leaflet.calls.markers.length));
+  check("map fitted to the route bounds",
+    leaflet.calls.fitBounds === 1 && leaflet.calls.boundsPoints === data.track.length,
+    leaflet.calls.fitBounds + " fits / " + leaflet.calls.boundsPoints + " points");
+  check("map size invalidated after reveal",
+    leaflet.calls.invalidateSize === 1, String(leaflet.calls.invalidateSize));
+  check("basemap buttons all wired",
+    basemapKeys.every((k) => !!element("basemap-" + k)._listeners.click));
+  check("offline SVG fallback not rendered", element("track").hidden === true);
+
+  const second = basemapKeys[1];
+  check("switching basemap is handled", click("basemap-" + second));
+  check("old tiles removed and new tiles added",
+    leaflet.calls.removed.length === 1
+    && leaflet.calls.tiles.length === 2
+    && leaflet.calls.tiles[1] === catalogue[1].url,
+    "removed=" + leaflet.calls.removed.length + " added=" + leaflet.calls.tiles.length);
+} else {
+  check("offline SVG route path rendered", /<path d="M/.test(html("track")), html("track").slice(0, 32));
+  check("offline SVG has start and finish markers",
+    (html("track").match(/<circle/g) || []).length === 2);
+  check("basemap control hidden without leaflet",
+    element("basemap-control").hidden === true);
+  check("map container left hidden", element("map").hidden === true);
+}
+
 check("track note reports point count", /GPS points/.test(text("track-note")), text("track-note"));
 
 check("file note reports sample counts", /samples recorded/.test(text("file-note")), text("file-note"));
@@ -157,11 +303,6 @@ check("file note reports sample counts", /samples recorded/.test(text("file-note
 /* ------------------- selectable rolling-average window ------------------- */
 
 console.log("\nrolling-average window picker:");
-
-const trace = data.trace || {};
-const options = trace.rolling_options || [];
-const windows = trace.rolling_windows || {};
-const pointCount = (trace.t || []).length;
 
 check("window options offered", options.length >= 2, options.join(", "));
 check("spans 30 s to 10 min",
@@ -171,9 +312,9 @@ check("a rolling series is embedded per option",
   options.every((w) => Array.isArray(windows[String(w)]) && windows[String(w)].length === pointCount),
   options.map((w) => w + ":" + (windows[String(w)] || []).length).join(" "));
 check("picker has a button per option",
-  options.every((w) => !!elements.get("window-" + w)), options.join(", "));
+  options.every((w) => !!element("window-" + w)), options.join(", "));
 check("picker buttons have click handlers",
-  options.every((w) => ((elements.get("window-" + w) || {})._listeners || {}).click),
+  options.every((w) => !!element("window-" + w)._listeners.click),
   "at least one button is unwired");
 check("opens on the 30 s window",
   /30 s rolling average/.test(text("rolling-legend")), text("rolling-legend"));

@@ -32,12 +32,20 @@ already-smoothed line.
 
 **Heart rate** — full HR trace, when the file has it.
 
-**Elevation** — altitude profile, when the file has it.
+**Elevation** — altitude profile, when the file has it. This is deliberately
+**withheld for water sports** (canoeing, kayaking, paddling, rowing, swimming,
+SUP, sailing, surfing…): on water the altitude trace is surface noise, not
+terrain, so waves and GPS drift read as climbing. The statistics are still
+computed and stored — only the panel is withheld, so a river trip can be put
+back with one flag.
+
+**Route** — the GPS track drawn on a real map background with a **Streets /
+Satellite / Terrain / Dark** switcher. All four providers are key-free, which is
+the point for a self-hosted app: no API key, no billing account, no signup. If
+Leaflet or the network is unavailable the track falls back to an inline SVG
+outline, so the shape is always visible.
 
 **Splits** — per-kilometre time, average speed, pace, max speed and average HR.
-
-**Track** — the GPS route drawn as an SVG outline with start and finish markers.
-No tile server, no network calls, no API keys.
 
 Charts are downsampled with [LTTB](https://github.com/sveinn-steinarsson/flot-downsample)
 before they reach the browser, so a 13,000-sample recording stays responsive on
@@ -69,6 +77,14 @@ SDA_DATA_DIR=/var/lib/sport-data-analyzer \
 than in `.github/workflows/` because pushing a workflow file needs a token with
 the **Workflows** permission; the header of the file has the one-line command to
 activate it.
+
+### Using Google Maps instead
+
+The map uses Leaflet with key-free tile providers (OpenStreetMap, Esri,
+OpenTopoMap, CARTO). Google Maps needs a **Maps JavaScript API key from a
+billing-enabled Cloud project**, and the key must be restricted to the origin
+the app is served from. The swap is confined to `app/basemaps.py` and the map
+block in `report.js`.
 
 ## Configuration
 
@@ -118,6 +134,10 @@ The interesting decisions, all of which have tests:
   trace. The average is deliberately hoisted out of the downsample loop —
   computing it inline recomputes the whole series once per plotted point, which
   took the 13,471-record fixture from 0.5 s to 105 s.
+- **Water sports.** Session type decides presentation, not analysis. Elevation
+  is withheld for anything on water, and the sub-sport is checked too so a
+  whitewater or open-water run recorded under a generic parent sport is caught.
+  Additions go in `app/profiles.py`.
 
 ## Storage
 
@@ -138,7 +158,7 @@ improving a statistic upgrades sessions you uploaded months ago.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest            # 80 tests
+python -m pytest            # 129 tests
 ```
 
 Coverage includes unit tests for every derived statistic, decoder tests against
@@ -170,12 +190,13 @@ PYTHONPATH=. python tools/profile_report.py tests/fixtures/real-wahoo-elemnt.fit
 app/
 ├── analysis.py     # statistics: histogram, rolling mean, splits, downsampling
 ├── fitio.py        # FIT decoding into columnar series
-├── profiles.py     # FIT enum tables (sport, sub-sport)
+├── profiles.py     # FIT enum tables (sport, sub-sport) + water-sport sets
+├── basemaps.py     # key-free tile providers for the route map
 ├── storage.py      # SQLite index + on-disk blobs
 ├── routes.py       # HTTP surface
 ├── formatting.py   # human-readable units
 ├── templates/      # Jinja pages
-└── static/         # CSS, upload JS, report JS, vendored Chart.js
+└── static/         # CSS, upload JS, report JS, vendored Chart.js + Leaflet
 tools/
 ├── make_sample_fit.py    # synthetic canoeing fixture generator
 ├── verify_report_js.js   # browserless frontend check

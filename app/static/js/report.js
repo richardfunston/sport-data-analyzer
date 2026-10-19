@@ -19,6 +19,8 @@
   var trace = report.trace || {};
   var splits = report.splits || [];
   var track = report.track || [];
+  // Withheld on water: the altitude trace there is surface noise, not terrain.
+  var showElevation = report.show_elevation !== false;
 
   var hasChart = typeof Chart !== "undefined";
   if (hasChart) {
@@ -99,7 +101,7 @@
     stats.push(["Avg cadence", summary.avg_cadence === null ? "—" : Math.round(summary.avg_cadence), "spm", null]);
     stats.push(["Max cadence", summary.max_cadence === null ? "—" : Math.round(summary.max_cadence), "spm", null]);
   }
-  if (summary.ascent_m !== null && summary.ascent_m !== undefined) {
+  if (showElevation && summary.ascent_m !== null && summary.ascent_m !== undefined) {
     stats.push(["Ascent", Math.round(summary.ascent_m), "m", null]);
     stats.push(["Descent", Math.round(summary.descent_m), "m", null]);
   }
@@ -367,7 +369,7 @@
 
   /* ---------------- elevation ---------------- */
 
-  if (summary.has_altitude && hasChart && trace.t && trace.t.length) {
+  if (showElevation && summary.has_altitude && hasChart && trace.t && trace.t.length) {
     document.getElementById("elev-card").hidden = false;
     new Chart(document.getElementById("elev-trace"), {
       type: "line",
@@ -428,10 +430,22 @@
       .join("");
   }
 
-  /* ---------------- GPS track ---------------- */
+  /* ---------------- route map ---------------- */
 
-  if (track.length > 1) {
-    var svg = document.getElementById("track");
+  function basemapCatalogue() {
+    var node = document.getElementById("basemap-data");
+    if (!node) return [];
+    try {
+      return JSON.parse(node.textContent) || [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  // Offline fallback: an inline SVG outline of the route. Needs no tiles, no
+  // network and no key, so the shape is always visible even with the phone
+  // off-network.
+  function renderSvgTrack(svg) {
     var lats = track.map(function (p) { return p[1]; });
     var lons = track.map(function (p) { return p[0]; });
     var latMid = (Math.min.apply(null, lats) + Math.max.apply(null, lats)) / 2;
@@ -448,9 +462,9 @@
 
     var d = "";
     for (var i = 0; i < track.length; i++) {
-      var px = offX + (xs[i] - minX) * scale;
-      var py = 100 - (offY + (lats[i] - minY) * scale);
-      d += (i ? "L" : "M") + px.toFixed(2) + " " + py.toFixed(2);
+      d += (i ? "L" : "M") +
+        (offX + (xs[i] - minX) * scale).toFixed(2) + " " +
+        (100 - (offY + (lats[i] - minY) * scale)).toFixed(2);
     }
 
     var startX = offX + (xs[0] - minX) * scale;
@@ -463,10 +477,90 @@
       'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
       '<circle cx="' + startX.toFixed(2) + '" cy="' + startY.toFixed(2) + '" r="1.8" fill="#2fd4c4"/>' +
       '<circle cx="' + endX.toFixed(2) + '" cy="' + endY.toFixed(2) + '" r="1.8" fill="#ffb347"/>';
+    svg.hidden = false;
+  }
+
+  function renderLeafletTrack(container) {
+    var catalogue = basemapCatalogue();
+    if (typeof L === "undefined" || !catalogue.length) return false;
+
+    var latlngs = track.map(function (point) { return [point[1], point[0]]; });
+
+    // Leaflet measures the container at construction time, so reveal it first.
+    container.hidden = false;
+    var map = L.map(container, { scrollWheelZoom: false, zoomControl: true });
+
+    var layers = {};
+    catalogue.forEach(function (base) {
+      layers[base.key] = L.tileLayer(base.url, {
+        attribution: base.attribution,
+        maxZoom: base.max_zoom,
+        subdomains: base.subdomains || "abc",
+      });
+    });
+
+    var current = catalogue[0].key;
+    layers[current].addTo(map);
+
+    L.polyline(latlngs, { color: "#2fd4c4", weight: 3, opacity: 0.9 }).addTo(map);
+    L.circleMarker(latlngs[0], {
+      radius: 6, color: "#04211f", weight: 2, fillColor: "#2fd4c4", fillOpacity: 1,
+    }).bindTooltip("Start").addTo(map);
+    L.circleMarker(latlngs[latlngs.length - 1], {
+      radius: 6, color: "#04211f", weight: 2, fillColor: "#ffb347", fillOpacity: 1,
+    }).bindTooltip("Finish").addTo(map);
+
+    map.fitBounds(L.latLngBounds(latlngs), { padding: [22, 22] });
+    map.invalidateSize();
+
+    function activate(key) {
+      if (key === current || !layers[key]) return;
+      map.removeLayer(layers[current]);
+      layers[key].addTo(map);
+      current = key;
+
+      var control = document.getElementById("basemap-control");
+      if (!control) return;
+      var buttons = control.querySelectorAll("button");
+      for (var i = 0; i < buttons.length; i++) {
+        var on = buttons[i].dataset.basemap === current;
+        buttons[i].classList.toggle("is-active", on);
+        buttons[i].setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    }
+
+    catalogue.forEach(function (base) {
+      var button = document.getElementById("basemap-" + base.key);
+      if (button) {
+        button.addEventListener("click", function () { activate(base.key); });
+      }
+    });
+
+    return true;
+  }
+
+  if (track.length > 1) {
+    var mapEl = document.getElementById("map");
+    var svgEl = document.getElementById("track");
+    var usedMap = false;
+
+    try {
+      usedMap = mapEl ? renderLeafletTrack(mapEl) : false;
+    } catch (err) {
+      usedMap = false;
+      if (mapEl) mapEl.hidden = true;
+    }
+
+    if (!usedMap && svgEl) {
+      renderSvgTrack(svgEl);
+      var control = document.getElementById("basemap-control");
+      if (control) control.hidden = true;
+    }
 
     document.getElementById("track-card").hidden = false;
     document.getElementById("track-note").textContent =
-      "Green dot: start · amber dot: finish · " + track.length + " GPS points plotted";
+      "Green dot: start · amber dot: finish · " + track.length + " GPS points" +
+      (usedMap ? " · tap the buttons above to change the background" : " plotted");
   }
 
   /* ---------------- file + delete ---------------- */
