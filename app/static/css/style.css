@@ -11,9 +11,16 @@
   --hot: #ff6b6b;
   --radius: 14px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --map-height: 500px;
 }
 
 * { box-sizing: border-box; }
+
+/* The hidden attribute must win over component rules. The UA's `[hidden]
+   { display: none }` loses to *any* author `display:` declaration, so without
+   this a component that sets `display` (`.track`, `.segmented`) stays on screen
+   even when the page marks it hidden. */
+[hidden] { display: none !important; }
 
 html { -webkit-text-size-adjust: 100%; }
 
@@ -268,7 +275,16 @@ tbody tr:hover { background: var(--panel-2); }
 
 /* ---------- misc ---------- */
 
-.track { width: 100%; height: auto; display: block; background: var(--panel-2); border-radius: 11px; border: 1px solid var(--line); }
+/* Offline fallback for the route. Sized to match the map so switching between
+   them does not make the page jump. */
+.track {
+  width: 100%;
+  height: var(--map-height);
+  display: block;
+  background: var(--panel-2);
+  border-radius: 11px;
+  border: 1px solid var(--line);
+}
 
 /* ---------- route map ---------- */
 
@@ -276,7 +292,7 @@ tbody tr:hover { background: var(--panel-2); }
   position: relative;
   z-index: 0;               /* keep Leaflet's panes under the sticky topbar */
   width: 100%;
-  height: 400px;
+  height: var(--map-height);
   border-radius: 11px;
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -309,7 +325,8 @@ tbody tr:hover { background: var(--panel-2); }
 .map .leaflet-bar a:hover { background: var(--panel-2); }
 
 @media (max-width: 520px) {
-  .map { height: 300px; }
+  /* Taller on a phone, not shorter: this is the view that matters. */
+  :root { --map-height: 420px; }
 }
 
 .empty { color: var(--muted); text-align: center; padding: 26px 10px; font-size: 14px; }
