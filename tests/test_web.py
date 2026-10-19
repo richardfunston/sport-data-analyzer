@@ -6,6 +6,7 @@ import io
 import json
 import re
 
+from app.analysis import ROLLING_WINDOWS
 from app.fitio import parse_fit
 
 
@@ -76,8 +77,25 @@ def test_report_page_embeds_the_payload(client, canoe_fit):
     assert len(payload["histogram"]["bins"]) == 24
     assert payload["trace"]["t"]
     assert len(payload["trace"]["t"]) == len(payload["trace"]["speed"])
+    assert payload["trace"]["rolling_options"] == list(ROLLING_WINDOWS)
+    assert set(payload["trace"]["rolling_windows"]) == {str(w) for w in ROLLING_WINDOWS}
     assert payload["splits"]
     assert len(payload["track"]) > 10
+
+
+def test_report_page_renders_the_rolling_window_picker(client, canoe_fit):
+    activity_id = upload(client, canoe_fit).get_json()["results"][0]["id"]
+    html = client.get(f"/a/{activity_id}").data.decode()
+
+    for window in ROLLING_WINDOWS:
+        assert f'id="window-{window}"' in html, window
+        assert f'data-window="{window}"' in html, window
+
+    assert ">10 min</button>" in html
+    assert ">30 s</button>" in html
+    # Exactly one option starts selected.
+    assert html.count('class="is-active"') == 1
+    assert html.count('aria-pressed="true"') == 1
 
 
 def test_report_charts_are_downsampled_to_a_bounded_size(client, canoe_fit):

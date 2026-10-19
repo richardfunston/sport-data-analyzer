@@ -9,6 +9,9 @@ import pytest
 from conftest import activity
 
 from app.analysis import (
+    DEFAULT_ROLLING_WINDOW,
+    ROLLING_WINDOWS,
+    build_report,
     elevation_gain,
     lttb_indices,
     rolling_mean,
@@ -256,3 +259,109 @@ def test_splits_divide_the_session_by_kilometre():
 
 def test_splits_empty_without_distance():
     assert splits([0.0, 1.0], [None, None], [1.0, 1.0], [None, None], [None, None]) == []
+
+
+# --------------------------------------------------------------------------
+# selectable rolling windows
+# --------------------------------------------------------------------------
+
+def _variance(values):
+    present = [v for v in values if v is not None]
+    mean = sum(present) / len(present)
+    return sum((v - mean) ** 2 for v in present) / len(present)
+
+
+def test_the_window_choices_span_30_seconds_to_10_minutes():
+    assert min(ROLLING_WINDOWS) == 30
+    assert max(ROLLING_WINDOWS) == 600
+    assert DEFAULT_ROLLING_WINDOW == 30
+
+
+def test_build_report_precomputes_a_series_for_every_window():
+    t = [float(i) for i in range(900)]
+    speed = [3.0 if i < 450 else 1.0 for i in range(900)]
+
+    trace = build_report(activity(t, speed=speed))["trace"]
+
+    assert trace["rolling_options"] == list(ROLLING_WINDOWS)
+    assert trace["window_s"] == DEFAULT_ROLLING_WINDOW
+
+    for window in ROLLING_WINDOWS:
+        series = trace["rolling_windows"][str(window)]
+        assert len(series) == len(trace["t"]), window
+        assert any(v is not None for v in series), window
+
+
+def test_each_window_returns_a_different_series():
+    # The period is not a divisor of any window, so no window aliases to a flat
+    # line and every option stays distinguishable.
+    t = [float(i) for i in range(1800)]
+    speed = [3.0 + 1.5 * math.sin(2 * math.pi * i / 180.0) for i in range(1800)]
+
+    windows = build_report(activity(t, speed=speed))["trace"]["rolling_windows"]
+
+    for window in ROLLING_WINDOWS:
+        series = windows[str(window)]
+        assert len(set(series)) > 1, f"{window}s window flattened the trace"
+    assert windows["30"] != windows["600"]
+
+
+def test_each_rolling_window_is_computed_exactly_once(monkeypatch):
+    """Guard against recomputing the average once per plotted point.
+
+    Writing the downsample as ``[rolling_mean(...)[i] for i in keep]`` calls the
+    rolling mean for every kept sample - a 1,200x blowup. This pins the call
+    count to the number of windows.
+    """
+    from app import analysis
+
+    calls: list[float] = []
+    original = analysis.rolling_mean
+
+    def spy(t, values, window_s):
+        calls.append(window_s)
+        return original(t, values, window_s)
+
+    monkeypatch.setattr(analysis, "rolling_mean", spy)
+
+    t = [float(i) for i in range(1500)]
+    speed = [3.0 + (i % 7) * 0.1 for i in range(1500)]
+    analysis.build_report(activity(t, speed=speed))
+
+    assert sorted(calls) == sorted(float(w) for w in ROLLING_WINDOWS), calls
+
+
+def test_longer_windows_are_smoother():
+    # A steady sinusoidal effort flattens as the window grows. The period is
+    # deliberately not a divisor of any window: a square wave resonates with a
+    # window the same length as its period and breaks the monotonicity.
+    t = [float(i) for i in range(1800)]
+    speed = [3.0 + 1.5 * math.sin(2 * math.pi * i / 180.0) for i in range(1800)]
+
+    windows = build_report(activity(t, speed=speed))["trace"]["rolling_windows"]
+    variances = [_variance(windows[str(w)]) for w in ROLLING_WINDOWS]
+
+    assert variances == sorted(variances, reverse=True), variances
+    assert variances[-1] < variances[0] / 10
+
+
+def test_a_window_longer_than_the_session_still_produces_a_series():
+    t = [float(i) for i in range(20)]
+    report = build_report(activity(t, speed=[2.0] * 20))
+
+    longest = report["trace"]["rolling_windows"][str(max(ROLLING_WINDOWS))]
+
+    assert len(longest) == len(report["trace"]["t"])
+    assert all(v == pytest.approx(2.0) for v in longest)
+
+
+def test_rolling_windows_never_go_negative():
+    t = [float(i) for i in range(2000)]
+    speed = [4.0] * 800 + [0.0] * 1200
+
+    windows = build_report(activity(t, speed=speed))["trace"]["rolling_windows"]
+
+    for window in ROLLING_WINDOWS:
+        values = [v for v in windows[str(window)] if v is not None]
+        assert min(values) >= 0.0, window
+        assert max(values) <= 4.0, window

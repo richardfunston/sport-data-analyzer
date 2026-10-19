@@ -17,7 +17,17 @@
 </div>
 
 <div class="card">
-  <h2>Speed trace</h2>
+  <div class="card-head">
+    <h2>Speed trace</h2>
+    <div class="segmented" id="rolling-control" role="group" aria-label="Rolling average window">
+      {% for w in report.trace.rolling_options %}
+        <button type="button" id="window-{{ w }}" data-window="{{ w }}"
+                class="{{ 'is-active' if w == report.trace.window_s else '' }}"
+                aria-pressed="{{ 'true' if w == report.trace.window_s else 'false' }}"
+        >{{ w | window_label }}</button>
+      {% endfor %}
+    </div>
+  </div>
   <div class="legend">
     <span><i style="background:#4a6b85"></i>instantaneous</span>
     <span><i style="background:#2fd4c4"></i><span id="rolling-legend"></span></span>

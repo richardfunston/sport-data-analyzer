@@ -86,6 +86,19 @@ def number(value: float | None, digits: int = 0) -> str:
     return f"{value:,.{digits}f}"
 
 
+def window_label(seconds: float | None) -> str:
+    """``30`` -> ``30 s``, ``60`` -> ``1 min``, ``600`` -> ``10 min``."""
+    if seconds is None:
+        return PLACEHOLDER
+    value = int(round(seconds))
+    if value < 60:
+        return f"{value} s"
+    minutes = value / 60.0
+    if minutes == int(minutes):
+        return f"{int(minutes)} min"
+    return f"{minutes:.1f} min"
+
+
 def register_filters(app) -> None:
     """Attach the formatters to a Flask app as Jinja filters."""
     app.jinja_env.filters.update(
@@ -97,4 +110,5 @@ def register_filters(app) -> None:
         daytime=daytime,
         short_date=short_date,
         number=number,
+        window_label=window_label,
     )

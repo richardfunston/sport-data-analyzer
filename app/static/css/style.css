@@ -75,6 +75,50 @@ a:hover { text-decoration: underline; }
 
 /* ---------- headings ---------- */
 
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.card-head h2 { margin: 0; }
+
+/* ---------- segmented control ---------- */
+
+.segmented {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.segmented button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button.is-active {
+  background: var(--accent);
+  color: #04211f;
+}
+
 h1 { font-size: 1.55rem; letter-spacing: -0.02em; margin: 0 0 4px; }
 h2 { font-size: 1.05rem; letter-spacing: -0.01em; margin: 0 0 14px; color: var(--text); }
 h3 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }

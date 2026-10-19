@@ -11,6 +11,7 @@ const fs = require("fs");
 const payload = fs.readFileSync(process.argv[2], "utf8");
 const reportSource = fs.readFileSync(process.argv[3], "utf8");
 
+const data = JSON.parse(payload);
 const charts = [];
 const elements = new Map();
 
@@ -20,9 +21,17 @@ function makeElement(id) {
     textContent: "",
     innerHTML: "",
     hidden: false,
+    value: "",
     dataset: {},
     style: {},
-    addEventListener() {},
+    _listeners: {},
+    addEventListener(type, fn) {
+      (this._listeners[type] = this._listeners[type] || []).push(fn);
+    },
+    setAttribute() {},
+    querySelectorAll() {
+      return [];
+    },
     classList: { add() {}, remove() {}, toggle() {} },
   };
 }
@@ -43,7 +52,15 @@ global.window = { confirm: () => false, alert: () => {}, location: {} };
 global.fetch = () => Promise.resolve({ ok: true });
 
 function Chart(element, config) {
-  charts.push({ element, config });
+  // Mirror enough of the real Chart.js instance that report.js can hold a
+  // reference, swap a dataset and call update().
+  this.element = element;
+  this.config = config;
+  this.data = config.data;
+  this.options = config.options;
+  this.updates = 0;
+  this.update = function () { this.updates += 1; };
+  charts.push(this);
 }
 Chart.defaults = { font: {}, plugins: {}, animation: true };
 global.Chart = Chart;
@@ -65,6 +82,12 @@ function check(name, condition, detail) {
 
 const text = (id) => (elements.get(id) || {}).textContent || "";
 const html = (id) => (elements.get(id) || {}).innerHTML || "";
+const click = (id) => {
+  const element = elements.get(id);
+  if (!element || !element._listeners.click) return false;
+  element._listeners.click.forEach((fn) => fn());
+  return true;
+};
 
 console.log("chart instances:", charts.length);
 charts.forEach((c, i) => {
@@ -130,6 +153,74 @@ check("track has start and finish markers", (html("track").match(/<circle/g) || 
 check("track note reports point count", /GPS points/.test(text("track-note")), text("track-note"));
 
 check("file note reports sample counts", /samples recorded/.test(text("file-note")), text("file-note"));
+
+/* ------------------- selectable rolling-average window ------------------- */
+
+console.log("\nrolling-average window picker:");
+
+const trace = data.trace || {};
+const options = trace.rolling_options || [];
+const windows = trace.rolling_windows || {};
+const pointCount = (trace.t || []).length;
+
+check("window options offered", options.length >= 2, options.join(", "));
+check("spans 30 s to 10 min",
+  Math.min(...options) === 30 && Math.max(...options) === 600, options.join(", "));
+check("offers five choices", options.length === 5, options.join(", "));
+check("a rolling series is embedded per option",
+  options.every((w) => Array.isArray(windows[String(w)]) && windows[String(w)].length === pointCount),
+  options.map((w) => w + ":" + (windows[String(w)] || []).length).join(" "));
+check("picker has a button per option",
+  options.every((w) => !!elements.get("window-" + w)), options.join(", "));
+check("picker buttons have click handlers",
+  options.every((w) => ((elements.get("window-" + w) || {})._listeners || {}).click),
+  "at least one button is unwired");
+check("opens on the 30 s window",
+  /30 s rolling average/.test(text("rolling-legend")), text("rolling-legend"));
+
+function variance(points) {
+  const ys = points.map((p) => p.y);
+  const mean = ys.reduce((a, b) => a + b, 0) / ys.length;
+  return ys.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ys.length;
+}
+
+const asKmh = (values) =>
+  values.map((v, i) => ({ x: trace.t[i], y: v === null ? null : v * 3.6 }))
+        .filter((p) => p.y !== null);
+
+const shortest = Math.min(...options);
+const longest = Math.max(...options);
+
+// Selecting the longest window must swap the chart's rolling dataset.
+const before = speedTrace.config.data.datasets[1].data;
+const varShort = variance(before);
+check("opens with the shortest window's series",
+  before.length === asKmh(windows[String(shortest)]).length,
+  before.length + " vs " + asKmh(windows[String(shortest)]).length);
+
+check("clicking a window is handled", click("window-" + longest));
+const after = speedTrace.config.data.datasets[1].data;
+const varLong = variance(after);
+
+check("legend reflects the new window",
+  /10 min rolling average/.test(text("rolling-legend")), text("rolling-legend"));
+check("rolling dataset was replaced",
+  after !== before && after.length === before.length,
+  after.length + " points");
+check("chart was re-rendered on switch", speedTrace.updates > 0, speedTrace.updates + " updates");
+check("longer window is visibly smoother", varLong < varShort,
+  "variance 30s=" + varShort.toFixed(4) + " 600s=" + varLong.toFixed(4));
+
+click("window-" + shortest);
+check("switching back restores the short window",
+  variance(speedTrace.config.data.datasets[1].data) > varLong
+  && /30 s rolling average/.test(text("rolling-legend")),
+  text("rolling-legend"));
+
+console.log("\nvariance by window (smoother = lower):");
+options.forEach((w) => {
+  console.log("  " + String(w).padStart(3) + " s  " + variance(asKmh(windows[String(w)])).toFixed(4));
+});
 
 console.log("\n" + (failures.length ? "FAILURES: " + failures.length : "ALL CHECKS PASSED"));
 process.exit(failures.length ? 1 : 0);

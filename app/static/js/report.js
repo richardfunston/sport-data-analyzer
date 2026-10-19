@@ -76,9 +76,6 @@
   if (meta.sample_count) subtitleBits.push(meta.sample_count.toLocaleString() + " samples");
   document.getElementById("report-subtitle").textContent = subtitleBits.join(" · ");
 
-  var rollingLabel = (trace.window_s || 30) + " s rolling average";
-  document.getElementById("rolling-legend").textContent = rollingLabel;
-
   /* ---------------- stat grid ---------------- */
 
   var grid = document.getElementById("stat-grid");
@@ -232,10 +229,48 @@
     document.getElementById("hist-note").textContent = "No speed samples in this file.";
   }
 
-  /* ---------------- speed trace ---------------- */
+  /* ---------------- speed trace + selectable rolling window ---------------- */
+
+  var rollingWindows = trace.rolling_windows || {};
+  var currentWindow = String(trace.window_s || 30);
+  var speedChart = null;
+
+  function windowLabel(seconds) {
+    var value = Number(seconds);
+    if (value < 60) return value + " s";
+    var minutes = value / 60;
+    return (minutes === Math.floor(minutes) ? minutes : minutes.toFixed(1)) + " min";
+  }
+
+  function rollingSeries(seconds) {
+    var values = rollingWindows[String(seconds)];
+    return values ? xy(trace.t, values, toKmh) : [];
+  }
+
+  function selectRollingWindow(seconds) {
+    currentWindow = String(seconds);
+
+    document.getElementById("rolling-legend").textContent =
+      windowLabel(seconds) + " rolling average";
+
+    if (speedChart) {
+      speedChart.data.datasets[1].data = rollingSeries(seconds);
+      speedChart.update();
+    }
+
+    var control = document.getElementById("rolling-control");
+    if (control) {
+      var buttons = control.querySelectorAll("button");
+      for (var i = 0; i < buttons.length; i++) {
+        var active = buttons[i].dataset.window === currentWindow;
+        buttons[i].classList.toggle("is-active", active);
+        buttons[i].setAttribute("aria-pressed", active ? "true" : "false");
+      }
+    }
+  }
 
   if (hasChart && trace.t && trace.t.length) {
-    new Chart(document.getElementById("speed-trace"), {
+    speedChart = new Chart(document.getElementById("speed-trace"), {
       type: "line",
       data: {
         datasets: [
@@ -249,7 +284,7 @@
           },
           {
             label: "rolling",
-            data: xy(trace.t, trace.rolling, toKmh),
+            data: rollingSeries(currentWindow),
             borderColor: "#2fd4c4",
             borderWidth: 2.5,
             pointRadius: 0,
@@ -277,6 +312,16 @@
       },
     });
   }
+
+  // Reflect the opening window, then wire the picker. The buttons exist in the
+  // markup already, so the control still reads correctly without JavaScript.
+  selectRollingWindow(currentWindow);
+  (trace.rolling_options || []).forEach(function (seconds) {
+    var button = document.getElementById("window-" + seconds);
+    if (button) {
+      button.addEventListener("click", function () { selectRollingWindow(seconds); });
+    }
+  });
 
   /* ---------------- heart rate ---------------- */
 

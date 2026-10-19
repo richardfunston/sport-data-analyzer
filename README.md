@@ -22,9 +22,13 @@ than a count of samples, because an hour spent crawling into wind should be
 visible as an hour. Annotated with the time-weighted mean, median, 95th
 percentile and the band you spent longest in.
 
-**Speed trace** — instantaneous speed plotted against elapsed time, with a 30 s
+**Speed trace** — instantaneous speed plotted against elapsed time, with a
 trailing rolling average drawn over the top. The rolling line is what makes the
-underlying effort pattern readable through GPS and paddle-stroke noise.
+underlying effort pattern readable through GPS and paddle-stroke noise, and the
+window is **selectable from 30 s to 10 min** so you can read short surges or the
+shape of a whole session. Every window is averaged over the full-resolution
+series at build time, so switching is instant and never re-smooths an
+already-smoothed line.
 
 **Heart rate** — full HR trace, when the file has it.
 
@@ -60,6 +64,11 @@ SDA_DATA_DIR=/var/lib/sport-data-analyzer \
 
 `deploy/sport-data-analyzer.service` is a systemd unit, and
 `deploy/Caddyfile.example` mounts the app under `/sport/` behind Caddy.
+
+`deploy/ci.workflow.yml` is a GitHub Actions workflow. It lives there rather
+than in `.github/workflows/` because pushing a workflow file needs a token with
+the **Workflows** permission; the header of the file has the one-line command to
+activate it.
 
 ## Configuration
 
@@ -104,6 +113,11 @@ The interesting decisions, all of which have tests:
 - **Sport names.** `fitdecode` ships a snapshot of the FIT profile and returns
   a bare integer for newer enum values — canoeing is `88`, which lands outside
   that snapshot. `app/profiles.py` carries the full official table.
+- **Rolling windows.** Every window is averaged over the full-resolution series
+  and only then downsampled; averaging an already-downsampled series smears the
+  trace. The average is deliberately hoisted out of the downsample loop —
+  computing it inline recomputes the whole series once per plotted point, which
+  took the 13,471-record fixture from 0.5 s to 105 s.
 
 ## Storage
 
@@ -124,7 +138,7 @@ improving a statistic upgrades sessions you uploaded months ago.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest            # 60 tests
+python -m pytest            # 80 tests
 ```
 
 Coverage includes unit tests for every derived statistic, decoder tests against
@@ -144,6 +158,12 @@ Frontend logic can be verified without a browser:
 node tools/verify_report_js.js payload.json app/static/js/report.js
 ```
 
+Analysis performance can be checked on a real file:
+
+```bash
+PYTHONPATH=. python tools/profile_report.py tests/fixtures/real-wahoo-elemnt.fit
+```
+
 ## Layout
 
 ```
@@ -159,6 +179,8 @@ app/
 tools/
 ├── make_sample_fit.py    # synthetic canoeing fixture generator
 ├── verify_report_js.js   # browserless frontend check
+├── profile_report.py     # time and profile the report build
+├── inspect_fit.py        # dump the structure of a .fit file
 └── w01.sh                # deployment helpers
 ```
 

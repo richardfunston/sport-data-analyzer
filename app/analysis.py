@@ -14,8 +14,13 @@ from .profiles import is_paddling
 #: Speed at or below this counts as stationary (m/s). 0.5 m/s ~ 1.8 km/h.
 MOVING_SPEED_MS = 0.5
 
-#: Default window for the "averaged speed trace" rolling mean (seconds).
-ROLLING_WINDOW_S = 30
+#: Selectable windows for the averaged speed trace, in seconds. Each is
+#: precomputed from the full-resolution series so switching is instant and the
+#: smoothing maths stays in one tested place.
+ROLLING_WINDOWS: tuple[int, ...] = (30, 60, 120, 300, 600)
+
+#: The window a report opens with.
+DEFAULT_ROLLING_WINDOW = 30
 
 #: Target number of bars in the speed histogram.
 HISTOGRAM_BINS = 24
@@ -29,7 +34,7 @@ MAX_CHART_POINTS = 1200
 #: Bumped whenever a change to the analysis alters stored reports. Stored
 #: reports carrying an older version are rebuilt from the original .fit file
 #: the next time they are opened.
-REPORT_VERSION = 2
+REPORT_VERSION = 3
 
 
 def _deltas(t: Sequence[float]) -> list[float]:
@@ -444,11 +449,18 @@ def build_report(activity: dict[str, Any], max_points: int = MAX_CHART_POINTS) -
     keep = _chart_indices(t, speed, max_points)
     trace_t = [t[i] for i in keep]
     trace_speed = [speed[i] for i in keep]
-    rolling = rolling_mean(t, speed, ROLLING_WINDOW_S)
-    trace_rolling = [rolling[i] for i in keep]
     trace_hr = [series["hr"][i] for i in keep]
     trace_cadence = [series["cadence"][i] for i in keep]
     trace_alt = [series["altitude"][i] for i in keep]
+
+    # Every window is averaged over the full-resolution series and only then
+    # downsampled - averaging the downsampled series would smear the trace.
+    # The average is hoisted out of the inner comprehension deliberately: calling
+    # it inside would recompute the whole series once per plotted point.
+    rolling_windows: dict[str, list[float | None]] = {}
+    for window in ROLLING_WINDOWS:
+        averaged = rolling_mean(t, speed, float(window))
+        rolling_windows[str(window)] = [averaged[i] for i in keep]
 
     track = [
         [series["lon"][i], series["lat"][i]]
@@ -467,11 +479,12 @@ def build_report(activity: dict[str, Any], max_points: int = MAX_CHART_POINTS) -
         "trace": {
             "t": trace_t,
             "speed": trace_speed,
-            "rolling": trace_rolling,
             "hr": trace_hr,
             "cadence": trace_cadence,
             "altitude": trace_alt,
-            "window_s": ROLLING_WINDOW_S,
+            "window_s": DEFAULT_ROLLING_WINDOW,
+            "rolling_options": list(ROLLING_WINDOWS),
+            "rolling_windows": rolling_windows,
         },
         "splits": splits(t, series["distance"], speed, series["hr"], series["altitude"]),
         "track": track,

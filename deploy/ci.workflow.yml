@@ -1,0 +1,42 @@
+# GitHub Actions CI.
+#
+# Kept here rather than in .github/workflows/ because pushing a workflow file
+# requires a token with the "Workflows" permission. To activate it once your
+# token has that scope:
+#
+#     mkdir -p .github/workflows && git mv deploy/ci.workflow.yml .github/workflows/ci.yml
+#     git commit -m "Enable CI" && git push
+#
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Check the code compiles
+        run: python -m compileall -q app tools wsgi.py
+
+      - name: Run tests
+        run: python -m pytest -q
