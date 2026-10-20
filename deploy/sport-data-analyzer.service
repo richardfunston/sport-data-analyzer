@@ -11,9 +11,13 @@ User=root
 WorkingDirectory=/opt/sport-data-analyzer
 Environment=SDA_DATA_DIR=/var/lib/sport-data-analyzer
 Environment=PYTHONUNBUFFERED=1
+# Bind on all interfaces so the reverse proxy (Nginx Proxy Manager on
+# 192.168.10.52) can reach it. Caddy on this host still fronts it on :80 at
+# /sport/ for LAN users. LAN clients can also reach :8090 directly, which
+# bypasses any auth added at the proxy - see README.
 ExecStart=/opt/sport-data-analyzer/.venv/bin/gunicorn \
     --workers 2 \
-    --bind 127.0.0.1:8090 \
+    --bind 0.0.0.0:8090 \
     --timeout 120 \
     --access-logfile - \
     --error-logfile - \

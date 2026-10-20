@@ -86,6 +86,33 @@ billing-enabled Cloud project**, and the key must be restricted to the origin
 the app is served from. The swap is confined to `app/basemaps.py` and the map
 block in `report.js`.
 
+## Exposing it to the internet
+
+**The app has no authentication of its own.** On a LAN that is a deliberate
+simplification; on the public internet it is not, so put something in front of
+it (a reverse proxy with basic auth, an identity-aware proxy, or a VPN).
+
+The topology this was built for:
+
+```
+internet → Nginx Proxy Manager (192.168.10.52 :80/:443)
+         → http://192.168.10.45:8090   (gunicorn, bound 0.0.0.0:8090)
+```
+
+gunicorn binds all interfaces so the proxy can reach it. Two consequences worth
+knowing:
+
+- **LAN clients can reach `:8090` directly**, bypassing any auth applied at the
+  proxy. If that matters, authenticate in the app rather than only at the edge.
+- Give the app a **dedicated hostname** (`paddle.example.com`), not a path
+  prefix. It generates root-relative URLs; mounting it under a path requires the
+  proxy to send `X-Forwarded-Prefix`, which is what Caddy does for the LAN
+  `/sport/` route.
+
+Let's Encrypt's HTTP-01 challenge needs port 80 reachable from the internet and
+the hostname resolving publicly. If your public IP is dynamic, point DNS at a
+dynamic-DNS name rather than a literal address.
+
 ## Configuration
 
 | Variable | Default | Meaning |
