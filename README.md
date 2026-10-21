@@ -88,11 +88,9 @@ block in `report.js`.
 
 ## Exposing it to the internet
 
-**The app has no authentication of its own.** On a LAN that is a deliberate
-simplification; on the public internet it is not, so put something in front of
-it (a reverse proxy with basic auth, an identity-aware proxy, or a VPN).
-
-The topology this was built for:
+It has its own accounts and sessions, so it is safe to expose directly — the
+proxy-level basic auth layer described below is optional defence in depth, not
+the thing keeping people out.
 
 ```
 internet → Nginx Proxy Manager (192.168.10.52 :80/:443)
@@ -102,12 +100,13 @@ internet → Nginx Proxy Manager (192.168.10.52 :80/:443)
 gunicorn binds all interfaces so the proxy can reach it. Two consequences worth
 knowing:
 
-- **LAN clients can reach `:8090` directly**, bypassing any auth applied at the
-  proxy. If that matters, authenticate in the app rather than only at the edge.
-- Give the app a **dedicated hostname** (`paddle.example.com`), not a path
-  prefix. It generates root-relative URLs; mounting it under a path requires the
-  proxy to send `X-Forwarded-Prefix`, which is what Caddy does for the LAN
-  `/sport/` route.
+- **LAN clients can reach `:8090` directly**, bypassing any basic auth applied
+  at the proxy. The app's own login still applies, which is why authentication
+  lives in the app and the proxy layer is only a second gate.
+- Give the app a **dedicated hostname** (`paddle.example.com`) when you can. It
+  generates root-relative URLs, so mounting it under a path only needs the proxy
+  to send `X-Forwarded-Prefix` — which is what Caddy does for the LAN `/sport/`
+  route. Both mounts are served by the same code.
 
 Let's Encrypt's HTTP-01 challenge needs port 80 reachable from the internet and
 the hostname resolving publicly. If your public IP is dynamic, point DNS at a
@@ -117,24 +116,78 @@ dynamic-DNS name rather than a literal address.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SDA_DATA_DIR` | `/var/lib/sport-data-analyzer` | Uploads and the SQLite index |
+| `SDA_DATA_DIR` | `/var/lib/sport-data-analyzer` | Uploads, the SQLite index, and the generated signing key |
 | `SDA_MAX_UPLOAD_BYTES` | `67108864` (64 MB) | Per-request upload ceiling |
-| `SDA_SECRET_KEY` | generated | Flask secret |
+| `SDA_SECRET_KEY` | generated into `$SDA_DATA_DIR/secret_key` | Session-cookie signing key |
 | `SDA_BASE_PATH` | *(empty)* | Prefix, if you are not using `X-Forwarded-Prefix` |
+| `SDA_INITIAL_PADDLER_EMAIL` | *(unset)* | First admin, created only when there are no paddlers |
+| `SDA_INITIAL_PADDLER_NAME` | *(unset)* | …their display name |
+| `SDA_INITIAL_PADDLER_PASSWORD` | *(unset)* | …their password. Never commit it |
+
+## Accounts
+
+Every page except `/healthz` needs a signed-in paddler. A session is a *shared*
+record: it carries a list of paddlers, and each paddler sees only the sessions
+they are linked to. A two-paddler canoe is one session linked twice.
+
+Create the first paddler on a live host:
+
+```bash
+cd /opt/sport-data-analyzer
+SDA_INITIAL_PADDLER_PASSWORD='…' .venv/bin/python -m app.cli create-paddler \
+    --email you@example.com --name 'Your Name' --admin
+```
+
+Or let a fresh install bootstrap itself from the three
+`SDA_INITIAL_PADDLER_*` variables above. That runs **only** when the users table
+is empty, so a restart can never resurrect a deleted account or reset a password.
+
+After that an admin manages everyone at `/admin/paddlers`: create paddlers,
+change passwords, promote or deactivate. Each report page carries a paddlers card
+for sharing that session with someone else.
+
+Four things worth knowing:
+
+- **A password change signs that paddler out everywhere.** The cookie carries a
+  `session_epoch`; changing the password bumps it, so a stolen cookie does not
+  outlive the password it belonged to.
+- **Deactivating a paddler takes effect on their next request**, not at their
+  next sign-in — the row is re-read every request rather than trusted from the
+  cookie.
+- **The last active admin cannot be demoted or deactivated.** That would lock
+  everyone out of the admin screen with no way back in through the UI.
+- **Sharing is explicit.** Being signed in grants nothing on its own; an unlinked
+  session answers `404` rather than `403`, because a `403` confirms it exists.
+
+Sessions last 12 hours and slide on each request. Passwords are stored as scrypt
+hashes — never in plain text, and the first one is never committed.
 
 ## HTTP surface
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | Upload page and recent sessions |
+| `GET`/`POST` | `/login` | Sign in |
+| `POST` | `/logout` | Sign out |
+| `GET` | `/` | Upload page and your recent sessions |
 | `POST` | `/api/upload` | Multipart `files`; returns a report link per file |
 | `GET` | `/a/<id>` | The report page |
 | `GET` | `/a/<id>/download` | The original `.fit`, byte for byte |
 | `POST` | `/api/a/<id>/delete` | Delete the session |
-| `GET` | `/healthz` | Liveness and activity count |
+| `POST` | `/api/a/<id>/paddlers` | `{"add": id}` or `{"remove": id}` — share the session |
+| `GET` | `/admin/paddlers` | Admin: list, create, change passwords |
+| `POST` | `/admin/paddlers/new` | Admin: create a paddler |
+| `POST` | `/admin/paddlers/<id>/password` | Admin: set a new password |
+| `POST` | `/admin/paddlers/<id>/update` | Admin: rename, promote, deactivate |
+| `GET` | `/healthz` | Liveness. Public, so it reports nothing else |
+
+Everything except `/login` and `/healthz` requires a session. `/admin/*` also
+requires an admin; a signed-in non-admin gets `403`, an anonymous caller gets a
+redirect to `/login` rather than a `403` that would confirm the route exists.
 
 Re-uploading a file you already have is detected by SHA-256 and returns the
-existing report instead of a duplicate.
+existing report instead of a duplicate — **and links the uploader to it**, so the
+second paddler in a canoe adding the same file from their own watch sees the
+session rather than being told it is a duplicate.
 
 ## How the stats are computed
 
@@ -170,11 +223,21 @@ The interesting decisions, all of which have tests:
 
 ```
 $SDA_DATA_DIR/
-├── sport.db                        # SQLite index: one row per session
+├── sport.db                        # SQLite: sessions, paddlers, and the links
+├── secret_key                      # generated once, mode 0600
 └── uploads/
     ├── <id>.fit                    # the original upload, unmodified
     └── <id>.report.json.gz         # the computed report payload
 ```
+
+Three tables: `activities` (one row per session), `users` (one row per paddler),
+and `activity_paddlers`, the join between them. The join is what makes a session
+shared — a canoe with two paddlers is one activity linked twice, and a paddler
+sees exactly the activities they are linked to.
+
+`users.email` is declared `COLLATE NOCASE`. SQLite's default `TEXT` collation is
+`BINARY`, so a plain `UNIQUE` accepts `RPF@…` beside `rpf@…` and splits one
+person into two accounts whose login depends on which casing they type.
 
 Reports are cached rather than recomputed per request. A `REPORT_VERSION` is
 stored inside each payload; opening a report written by an older version of the
@@ -185,12 +248,16 @@ improving a statistic upgrades sessions you uploaded months ago.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest            # 129 tests
+python -m pytest            # 254 tests
 ```
 
 Coverage includes unit tests for every derived statistic, decoder tests against
-a synthetic canoeing session and a real 13,471-record Wahoo ELEMNT ride, and
-end-to-end tests of upload, dedupe, report rendering, deletion and rebuilding.
+a synthetic canoeing session and a real 13,471-record Wahoo ELEMNT ride,
+end-to-end tests of upload, dedupe, report rendering, deletion and rebuilding,
+and the account model: password hashing, the session epoch, per-paddler
+visibility (including the 404 for an unlinked session), the admin screen's
+lockout guards, the CLI, and that the backfill is wired into the app factory
+rather than merely available in the store.
 
 Two fixtures live in `tests/fixtures/`:
 
