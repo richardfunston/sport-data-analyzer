@@ -148,11 +148,23 @@ class Store:
 
     # -- writes ------------------------------------------------------------
 
-    def save(self, filename: str, raw: bytes, report: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    def save(
+        self,
+        filename: str,
+        raw: bytes,
+        report: dict[str, Any],
+        *,
+        user_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
         """Store an activity.
 
         Returns ``(record, created)``. Re-uploading identical bytes returns
         the existing record with ``created=False``.
+
+        ``user_id`` links the uploader. It is applied on **both** paths: a
+        second paddler re-uploading a file that already exists must still end up
+        linked to it, or the session never appears for them - which is exactly
+        the case this feature exists for.
         """
         digest = hashlib.sha256(raw).hexdigest()
 
@@ -161,6 +173,8 @@ class Store:
                 "SELECT * FROM activities WHERE sha256 = ?", (digest,)
             ).fetchone()
         if existing is not None:
+            if user_id is not None:
+                self.link_paddler(existing["id"], user_id)
             return dict(existing), False
 
         activity_id = self._new_id()
@@ -183,6 +197,9 @@ class Store:
                 f"INSERT INTO activities ({columns}) VALUES ({placeholders})", row
             )
             conn.commit()
+
+        if user_id is not None:
+            self.link_paddler(activity_id, user_id)
 
         return dict(row), True
 

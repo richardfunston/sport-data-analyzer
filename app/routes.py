@@ -71,22 +71,28 @@ def logout():
 
 
 @bp.get("/")
+@login_required
 def index():
     store = _store()
+    paddler = current_paddler()
     return render_template(
         "index.html",
-        activities=store.list(60),
-        count=store.count(),
+        activities=store.list_for(paddler["id"], 60),
+        # Scoped, not global: a deployment-wide number above a filtered list
+        # reads as a bug to the person looking at it.
+        count=store.count_for(paddler["id"]),
     )
 
 
 @bp.post("/api/upload")
+@login_required
 def upload():
     """Accept one or more .fit files and return a report link for each."""
     files = request.files.getlist("files") or list(request.files.values())
     if not files:
         return jsonify({"error": "no files were uploaded"}), 400
 
+    uploader_id = current_paddler()["id"]
     results: list[dict[str, Any]] = []
     for upload_file in files:
         name = upload_file.filename or "upload.fit"
@@ -113,7 +119,7 @@ def upload():
             )
             continue
 
-        record, created = _store().save(name, raw, report)
+        record, created = _store().save(name, raw, report, user_id=uploader_id)
         results.append(
             {
                 "filename": name,
@@ -144,9 +150,12 @@ def _rebuild_report(store, activity_id: str) -> dict[str, Any] | None:
 
 
 @bp.get("/a/<activity_id>")
+@login_required
 def activity(activity_id: str):
     store = _store()
-    record = store.get(activity_id)
+    # get_for, not get: an unlinked paddler gets a 404 and cannot confirm the id
+    # exists. A 403 would tell them it does.
+    record = store.get_for(activity_id, current_paddler()["id"])
     if record is None:
         abort(404, description="no such activity")
 
@@ -164,9 +173,10 @@ def activity(activity_id: str):
 
 
 @bp.get("/a/<activity_id>/download")
+@login_required
 def download(activity_id: str):
     store = _store()
-    record = store.get(activity_id)
+    record = store.get_for(activity_id, current_paddler()["id"])
     if record is None:
         abort(404)
     return send_file(
@@ -178,15 +188,24 @@ def download(activity_id: str):
 
 
 @bp.post("/api/a/<activity_id>/delete")
+@login_required
 def delete(activity_id: str):
-    if not _store().delete(activity_id):
+    store = _store()
+    if store.get_for(activity_id, current_paddler()["id"]) is None:
+        abort(404)
+    if not store.delete(activity_id):
         abort(404)
     return jsonify({"ok": True})
 
 
 @bp.get("/healthz")
 def healthz():
-    return jsonify({"ok": True, "activities": _store().count()})
+    """Public, so it must not disclose anything about the deployment.
+
+    It used to return the total activity count, which told any anonymous caller
+    how much is here.
+    """
+    return jsonify({"ok": True})
 
 
 @bp.app_errorhandler(413)

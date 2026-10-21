@@ -6,8 +6,22 @@ import io
 import json
 import re
 
+import pytest
+
 from app.analysis import ROLLING_WINDOWS
 from app.fitio import parse_fit
+from conftest import sign_in
+
+
+@pytest.fixture()
+def client(app, store):
+    """A signed-in client.
+
+    Every test in this module is about the HTTP surface, not about who may reach
+    it -- that is tests/test_visibility.py. Signing in here keeps these tests
+    testing what they were written to test.
+    """
+    return sign_in(app.test_client(), store.create_paddler("tester@funston.com", "Tester", "pw"))
 
 
 def upload(client, payload: bytes, filename: str = "canoe-session.fit"):
@@ -27,7 +41,8 @@ def test_index_renders(client):
 def test_healthz(client):
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.get_json() == {"ok": True, "activities": 0}
+    # Public, and it must not disclose the size of the deployment.
+    assert response.get_json() == {"ok": True}
 
 
 def test_upload_returns_a_report_link(client, canoe_fit):
@@ -45,7 +60,7 @@ def test_upload_returns_a_report_link(client, canoe_fit):
     assert result["url"].endswith("/a/" + result["id"])
 
 
-def test_uploaded_activity_appears_in_the_index(client, canoe_fit):
+def test_uploaded_activity_appears_in_the_index(client, store, canoe_fit):
     upload(client, canoe_fit)
 
     response = client.get("/")
@@ -53,7 +68,7 @@ def test_uploaded_activity_appears_in_the_index(client, canoe_fit):
     assert b"canoe-session.fit" not in response.data  # only the date is listed
     assert b"Canoeing" in response.data
 
-    assert client.get("/healthz").get_json()["activities"] == 1
+    assert store.count_for(client.paddler["id"]) == 1
 
 
 def test_report_page_embeds_the_payload(client, canoe_fit):
@@ -120,16 +135,16 @@ def test_report_charts_are_downsampled_to_a_bounded_size(client, canoe_fit):
     assert report["points_charted"] == len(report["trace"]["t"])
 
 
-def test_reuploading_the_same_file_is_deduplicated(client, canoe_fit):
+def test_reuploading_the_same_file_is_deduplicated(client, store, canoe_fit):
     first = upload(client, canoe_fit).get_json()["results"][0]
     second = upload(client, canoe_fit).get_json()["results"][0]
 
     assert second["id"] == first["id"]
     assert second["created"] is False
-    assert client.get("/healthz").get_json()["activities"] == 1
+    assert store.count_for(client.paddler["id"]) == 1
 
 
-def test_uploading_multiple_files_in_one_request(client, canoe_fit):
+def test_uploading_multiple_files_in_one_request(client, store, canoe_fit):
     response = client.post(
         "/api/upload",
         data={
@@ -145,7 +160,7 @@ def test_uploading_multiple_files_in_one_request(client, canoe_fit):
     assert all(r["ok"] for r in results)
     # Same bytes twice -> one stored activity.
     assert results[0]["id"] == results[1]["id"]
-    assert client.get("/healthz").get_json()["activities"] == 1
+    assert store.count_for(client.paddler["id"]) == 1
 
 
 def test_non_fit_upload_is_rejected(client):
@@ -180,12 +195,12 @@ def test_download_returns_the_original_bytes(client, canoe_fit):
     assert response.data == canoe_fit
 
 
-def test_delete_removes_the_activity(client, canoe_fit):
+def test_delete_removes_the_activity(client, store, canoe_fit):
     activity_id = upload(client, canoe_fit).get_json()["results"][0]["id"]
 
     assert client.post(f"/api/a/{activity_id}/delete").status_code == 200
     assert client.get(f"/a/{activity_id}").status_code == 404
-    assert client.get("/healthz").get_json()["activities"] == 0
+    assert store.count_for(client.paddler["id"]) == 0
 
 
 def test_stale_report_is_rebuilt_from_the_original_file(app, client, canoe_fit):

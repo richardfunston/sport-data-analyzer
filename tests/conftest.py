@@ -84,6 +84,46 @@ def saved_activity(store):
     return record["id"]
 
 
+def sign_in(client, user):
+    """Put a paddler's session on a test client and hand it back."""
+    with client.session_transaction() as sess:
+        sess["user_id"] = user["id"]
+        sess["epoch"] = int(user["session_epoch"])
+    client.paddler = user
+    return client
+
+
+@pytest.fixture()
+def signed_in(client, store):
+    """A client already carrying a session for a fresh, non-admin paddler."""
+    return sign_in(client, store.create_paddler("a@funston.com", "A", "pw"))
+
+
+@pytest.fixture()
+def another_activity(store):
+    """A second saved activity, linked to nobody."""
+    record, _ = store.save(
+        "other.fit",
+        b"\x00fit-other",
+        minimal_report(start_time="2024-07-01T08:00:00+00:00"),
+    )
+    return record["id"]
+
+
+@pytest.fixture()
+def real_activity(store, canoe_fit):
+    """A stored activity with a genuine report, so the report page can render.
+
+    ``saved_activity`` is enough for anything that only reads the index, but the
+    report template walks the full payload.
+    """
+    from app.analysis import build_report
+    from app.fitio import parse_fit
+
+    record, _ = store.save("canoe.fit", canoe_fit, build_report(parse_fit(canoe_fit)))
+    return record["id"]
+
+
 def activity(t, sport="canoeing", sub_sport=None, **series):
     """Build a minimal activity dict for the analysis functions."""
     columns = {key: [None] * len(t) for key in SERIES_KEYS}
