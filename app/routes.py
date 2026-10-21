@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from flask import (
@@ -24,6 +23,7 @@ from .auth import (
     login_paddler,
     login_required,
     logout_paddler,
+    usable_email,
 )
 from .basemaps import BASEMAPS
 from .fitio import FitError, parse_fit
@@ -279,8 +279,8 @@ def _render_admin(store, *, error=None, notice=None, form=None, status=200):
 
 
 def _usable_email(candidate: str) -> bool:
-    """Enough of a check that a typo cannot quietly become an account."""
-    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", candidate.strip()))
+    """Kept as a thin alias so the route reads naturally; see auth.usable_email."""
+    return usable_email(candidate)
 
 
 @bp.get("/admin/paddlers")

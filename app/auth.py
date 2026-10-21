@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 import secrets
 from pathlib import Path
 from typing import Any, Callable
@@ -29,7 +30,17 @@ __all__ = [
     "logout_paddler",
     "login_required",
     "admin_required",
+    "usable_email",
 ]
+
+#: Enough of a check that a typo cannot quietly become an account. NPM's own
+#: add-user form silently refuses an unparseable address, which is exactly the
+#: failure this guards against.
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def usable_email(candidate: str) -> bool:
+    return bool(_EMAIL_PATTERN.match((candidate or "").strip()))
 
 #: Name of the key file inside the data directory.
 SECRET_KEY_FILENAME = "secret_key"
