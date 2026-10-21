@@ -50,6 +50,40 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture()
+def store(app):
+    """The store the app is actually using, over its throwaway data directory.
+
+    Deliberately read off the app rather than constructed here: a second Store
+    rooted somewhere else would let tests pass while the app used another
+    database.
+    """
+    return app.extensions["store"]
+
+
+def minimal_report(**meta):
+    """A report payload with the fields the index depends on."""
+    from app.analysis import REPORT_VERSION
+
+    return {
+        "version": REPORT_VERSION,
+        "meta": {
+            "start_time": "2024-06-15T08:00:00+00:00",
+            "sport": "canoeing",
+            **meta,
+        },
+        "summary": {"elapsed_s": 100.0, "distance_m": 500.0},
+        "series": [],
+    }
+
+
+@pytest.fixture()
+def saved_activity(store):
+    """A stored activity, needing no .fit file."""
+    record, _ = store.save("canoe.fit", b"\x00fit", minimal_report())
+    return record["id"]
+
+
 def activity(t, sport="canoeing", sub_sport=None, **series):
     """Build a minimal activity dict for the analysis functions."""
     columns = {key: [None] * len(t) for key in SERIES_KEYS}

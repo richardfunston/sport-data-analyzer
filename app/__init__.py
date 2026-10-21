@@ -22,7 +22,17 @@ def create_app(config_object: type[Config] = Config) -> Flask:
         app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
     )
 
-    app.extensions["store"] = Store(config_object.DATA_DIR)
+    store = Store(config_object.DATA_DIR)
+    app.extensions["store"] = store
+
+    # Adopt any activity that has no paddler at all. Unconditional and
+    # idempotent, on every startup: an unowned session is invisible to every
+    # account, which is indistinguishable from having lost it. Gating this on
+    # an empty users table would skip it on the rollout path, where the first
+    # account is created by the CLI and the table is therefore no longer empty.
+    admin = store.first_admin()
+    if admin is not None:
+        store.backfill_paddlers(admin["id"])
 
     from .formatting import register_filters
 
