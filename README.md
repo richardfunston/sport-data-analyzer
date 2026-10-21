@@ -177,6 +177,12 @@ sends it in the clear while the plain-HTTP LAN mount still works; set
 Passwords are stored as scrypt hashes — never in plain text, and the first one is
 never committed.
 
+**Signing out clears your browser's copy of the cookie, and that is all it does.**
+These are client-side cookie sessions, so `/logout` cannot revoke a copy someone
+already took. If a cookie may have been copied — a shared or lost device — the
+way to end that session for good is to **change the password**, which bumps
+`session_epoch` and invalidates every cookie issued before it.
+
 ## HTTP surface
 
 | Method | Path | Purpose |
