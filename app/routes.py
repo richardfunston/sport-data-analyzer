@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from flask import (
     Blueprint,
@@ -29,13 +30,54 @@ from .auth import (
 )
 from .basemaps import BASEMAPS
 from .fitio import FitError, parse_fit
-from .storage import DuplicateEmail
+from .storage import DuplicateEmail, LastAdminError
 
 bp = Blueprint("sda", __name__)
 
 
 def _store():
     return current_app.extensions["store"]
+
+
+#: Methods that change something. A cross-site request using one of these is
+#: precisely what CSRF is.
+UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _same_site(source: str | None) -> bool:
+    """True when ``source`` is a URL on this very host, or absent.
+
+    An absent header is allowed on purpose. A browser cannot suppress ``Origin``
+    on a cross-site POST - it is a forbidden header name - so no header means the
+    caller is not a browser making a cross-site request: curl, a script, an
+    uptime probe. Refusing those would break every non-browser client to defend
+    against an attack that cannot take that shape.
+    """
+    if not source:
+        return True
+    if source == "null":
+        # A sandboxed iframe or a file:// page. Not this site.
+        return False
+    origin = urlsplit(source)
+    if not origin.netloc:
+        return False
+    return origin.netloc.lower() == request.host.lower()
+
+
+@bp.before_request
+def _refuse_cross_site_writes():
+    """Refuse a write whose Origin/Referer names another site.
+
+    ``SameSite=Lax`` already stops the ordinary cross-site form post, so this is
+    the second gate: it also covers same-site hosts under a shared parent domain
+    and clients that ignore SameSite. It costs a header comparison rather than a
+    token library and a template change on every form.
+    """
+    if request.method in UNSAFE_METHODS:
+        source = request.headers.get("Origin") or request.headers.get("Referer")
+        if not _same_site(source):
+            abort(403, description="Cross-site request refused.")
+    return None
 
 
 def _safe_next(candidate: str | None) -> str:
@@ -387,19 +429,9 @@ def admin_paddler_update(user_id: str):
     wants_active = request.form.get("is_active")
 
     # Refuse the change that would leave nobody able to reach this screen.
-    # There is no way back in through the UI once it happens.
-    demoting = wants_admin == "0"
-    deactivating = wants_active == "0"
-    if (demoting or deactivating) and target["is_admin"] and target["is_active"]:
-        if store.count_admins(active_only=True) <= 1:
-            abort(
-                400,
-                description=(
-                    "That would leave no active admin, and there would be no way "
-                    "back into this screen."
-                ),
-            )
-
+    # There is no way back in through the UI once it happens. The count and the
+    # write happen in one transaction inside the store, because counting here and
+    # updating afterwards is the check-then-act race two workers can lose.
     fields: dict[str, Any] = {}
     if name is not None:
         cleaned = name.strip()
@@ -412,7 +444,16 @@ def admin_paddler_update(user_id: str):
         fields["is_active"] = wants_active == "1"
 
     if fields:
-        store.update_paddler(user_id, **fields)
+        try:
+            store.update_paddler_safely(user_id, **fields)
+        except LastAdminError:
+            abort(
+                400,
+                description=(
+                    "That would leave no active admin, and there would be no way "
+                    "back into this screen."
+                ),
+            )
 
     notice = f"{target['name']} updated."
 

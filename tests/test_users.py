@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 
 from app import create_app
 from app.config import Config
-from app.storage import DuplicateEmail, Store
+from app.storage import DuplicateEmail, LastAdminError, Store
 
 from conftest import minimal_report
 
@@ -251,3 +252,89 @@ def test_startup_backfill_is_idempotent(tmp_path):
     store = Store(data)
     richard = store.get_paddler_by_email("rpf@funston.com")
     assert store.count_for(richard["id"]) == 1
+
+
+# -- the last-admin guard, atomically ---------------------------------------
+
+
+def test_update_paddler_safely_refuses_the_last_admin_demoting_themselves(store):
+    me = store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    with pytest.raises(LastAdminError):
+        store.update_paddler_safely(me["id"], is_admin=False)
+    assert store.get_paddler(me["id"])["is_admin"] == 1
+
+
+def test_update_paddler_safely_refuses_the_last_admin_deactivating_themselves(store):
+    me = store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    with pytest.raises(LastAdminError):
+        store.update_paddler_safely(me["id"], is_active=False)
+    assert store.count_admins(active_only=True) == 1
+
+
+def test_update_paddler_safely_allows_a_spare_admin_to_be_demoted(store):
+    store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    other = store.create_paddler("b@funston.com", "B", "pw", is_admin=True)
+    updated = store.update_paddler_safely(other["id"], is_admin=False)
+    assert updated["is_admin"] == 0
+    assert store.count_admins(active_only=True) == 1
+
+
+def test_update_paddler_safely_allows_reactivating(store):
+    """Turning access back on never reduces the admin count."""
+    me = store.create_paddler("a@funston.com", "A", "pw", is_admin=True, is_active=False)
+    store.create_paddler("b@funston.com", "B", "pw", is_admin=True)
+    updated = store.update_paddler_safely(me["id"], is_active=True)
+    assert updated["is_active"] == 1
+
+
+def test_update_paddler_safely_still_renames(store):
+    store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    updated = store.update_paddler_safely(
+        store.get_paddler_by_email("a@funston.com")["id"], name="Ann"
+    )
+    assert updated["name"] == "Ann"
+
+
+def test_update_paddler_safely_returns_none_for_an_unknown_id(store):
+    assert store.update_paddler_safely("nosuchid", name="X") is None
+
+
+def test_update_paddler_safely_ignores_an_inactive_admin(store):
+    """An already-dead admin is not one of the admins being protected."""
+    store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    dead = store.create_paddler("d@funston.com", "D", "pw", is_admin=True, is_active=False)
+    updated = store.update_paddler_safely(dead["id"], is_admin=False)
+    assert updated["is_admin"] == 0
+
+
+def test_two_racing_demotions_cannot_leave_zero_admins(store):
+    """The guard is evaluated in the same transaction as the write.
+
+    Counting first and updating after is check-then-act: two workers can both
+    read a count of two, both decide the demotion is safe, and both apply it -
+    reaching zero active admins with no way back into the admin screen. This is
+    deterministic regardless of interleaving, because the second demotion must
+    always be refused.
+    """
+    a = store.create_paddler("a@funston.com", "A", "pw", is_admin=True)
+    b = store.create_paddler("b@funston.com", "B", "pw", is_admin=True)
+
+    outcomes: list[str] = []
+    barrier = threading.Barrier(2)
+
+    def demote(user):
+        barrier.wait()
+        try:
+            store.update_paddler_safely(user["id"], is_admin=False)
+            outcomes.append("ok")
+        except LastAdminError:
+            outcomes.append("refused")
+
+    threads = [threading.Thread(target=demote, args=(u,)) for u in (a, b)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert store.count_admins(active_only=True) >= 1
+    assert sorted(outcomes) == ["ok", "refused"]

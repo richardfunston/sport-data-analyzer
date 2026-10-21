@@ -21,11 +21,19 @@ from typing import Any
 
 from .auth import check_password, hash_password
 
-__all__ = ["DuplicateEmail", "Store"]
+__all__ = ["DuplicateEmail", "LastAdminError", "Store"]
 
 
 class DuplicateEmail(Exception):
     """Raised when a paddler is created with an email that already exists."""
+
+
+class LastAdminError(Exception):
+    """Raised when a change would leave no active admin.
+
+    With zero active admins there is no way back into the admin screen through
+    the UI, so the change that would reach that state is refused instead.
+    """
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS activities (
@@ -389,6 +397,81 @@ class Store:
                 )
                 conn.commit()
         return self.get_paddler(user_id)
+
+    def update_paddler_safely(
+        self,
+        user_id: str,
+        *,
+        name: str | None = None,
+        is_admin: bool | None = None,
+        is_active: bool | None = None,
+    ) -> dict[str, Any] | None:
+        """Update a paddler, refusing any change that would leave no active admin.
+
+        Returns the updated row, or ``None`` for an unknown id. Raises
+        :class:`LastAdminError` when the change is refused.
+
+        The count and the write run inside one ``BEGIN IMMEDIATE`` transaction,
+        which takes the write lock before the count is read. Counting first and
+        updating afterwards is check-then-act: gunicorn runs two workers with no
+        ``--preload``, so both can read a count of two, both conclude the change
+        is safe, and both apply it - reaching zero active admins, which locks
+        everyone out of the admin screen with no way back in through the UI.
+        """
+        fields: dict[str, Any] = {}
+        if name is not None:
+            fields["name"] = name
+        if is_admin is not None:
+            fields["is_admin"] = 1 if is_admin else 0
+        if is_active is not None:
+            fields["is_active"] = 1 if is_active else 0
+
+        conn = self._connect()
+        conn.isolation_level = None  # take transaction control ourselves
+        committed = False
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is None:
+                return None
+
+            # Only a change that takes an active admin away can reduce the count.
+            removes_an_active_admin = (
+                bool(row["is_admin"])
+                and bool(row["is_active"])
+                and (fields.get("is_admin") == 0 or fields.get("is_active") == 0)
+            )
+            if removes_an_active_admin:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND is_active = 1"
+                ).fetchone()[0]
+                if remaining <= 1:
+                    raise LastAdminError(user_id)
+
+            if fields:
+                fields["modified_at"] = datetime.now(timezone.utc).isoformat()
+                assignments = ", ".join(f"{column} = :{column}" for column in fields)
+                conn.execute(
+                    f"UPDATE users SET {assignments} WHERE id = :id",
+                    {**fields, "id": user_id},
+                )
+
+            updated = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            conn.execute("COMMIT")
+            committed = True
+            return dict(updated) if updated else None
+        finally:
+            if not committed:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            conn.close()
 
     def set_password(self, user_id: str, password: str) -> bool:
         """Set a new password and bump ``session_epoch``.

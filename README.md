@@ -146,7 +146,7 @@ After that an admin manages everyone at `/admin/paddlers`: create paddlers,
 change passwords, promote or deactivate. Each report page carries a paddlers card
 for sharing that session with someone else.
 
-Six things worth knowing:
+Seven things worth knowing:
 
 - **A password change signs that paddler out everywhere.** The cookie carries a
   `session_epoch`; changing the password bumps it, so a stolen cookie does not
@@ -169,6 +169,14 @@ Six things worth knowing:
   sessions that would otherwise become invisible to every account are reassigned
   to the admin doing the deactivating, and the screen says how many. The same
   dead end is why removing the last paddler from a session is refused outright.
+- **A write from another site is refused.** A `POST` whose `Origin` (or
+  `Referer`) names a different host answers `403`, across the whole app — login,
+  upload, delete, sharing and the admin screen. `SameSite=Lax` already stops the
+  ordinary cross-site form post, so this is the second gate: it also covers
+  same-site hosts under a shared parent domain, and clients that ignore
+  `SameSite`. A request sending neither header is allowed, because a browser
+  cannot suppress `Origin` on a cross-site `POST` — it is a forbidden header — so
+  an absent header means the caller is not a browser making a cross-site request.
 
 Sessions last 12 hours and slide on each request. The session cookie is marked
 `Secure` whenever the request itself was HTTPS, so the public hostname never
@@ -269,7 +277,7 @@ improving a statistic upgrades sessions you uploaded months ago.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest            # 254 tests
+python -m pytest            # 288 tests
 ```
 
 Coverage includes unit tests for every derived statistic, decoder tests against
