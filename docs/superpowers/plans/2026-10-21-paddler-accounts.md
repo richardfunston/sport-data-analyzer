@@ -58,6 +58,7 @@ Failure modes the spec implies but no single task's tests would otherwise catch.
   - `Store.get_for(activity_id: str, user_id: str) -> dict[str, Any] | None`
   - `Store.count_for(user_id: str) -> int`
   - `Store.count_admins(*, active_only: bool = False) -> int`
+  - `Store.first_admin() -> dict[str, Any] | None`
   - `Store.backfill_paddlers(user_id: str) -> int`
 
 - [ ] **Step 1: Write the failing tests**
@@ -172,7 +173,7 @@ Append to `SCHEMA` in `app/storage.py`, after the `activities` index:
 ```sql
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
-    email         TEXT NOT NULL UNIQUE,
+    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
     name          TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_admin      INTEGER NOT NULL DEFAULT 0,
@@ -230,6 +231,40 @@ and returns the number inserted:
 INSERT INTO activity_paddlers (activity_id, user_id)
 SELECT id, ? FROM activities
  WHERE id NOT IN (SELECT activity_id FROM activity_paddlers)
+```
+
+**The invocation is what the rollout depends on.** `create_app` calls
+`store.backfill_paddlers(admin["id"])` on every startup whenever
+`store.count_admins(active_only=True)` is non-zero, using `store.first_admin()` to
+pick the target. It must **not** be gated on the empty-users-table bootstrap: the
+rollout creates `richard` through the CLI, which takes the other branch, and every
+pre-existing session would then be linked to nobody — visible to no account, and
+indistinguishable from having lost the data.
+
+Add a test driving this through `create_app`, not just through the store method.
+The store method passing proves nothing about whether anything calls it.
+
+```python
+def test_startup_links_orphaned_activities(tmp_path, monkeypatch):
+    """Backfill is wired into the factory, not just available in the store."""
+    store = Store(tmp_path)
+    store.save("old.fit", b"\x00old", _report())
+    store.create_paddler("rpf@funston.com", "Richard", "pw", is_admin=True)
+
+    monkeypatch.setenv("SDA_DATA_DIR", str(tmp_path))
+    app = create_app()
+    user = Store(tmp_path).get_paddler_by_email("rpf@funston.com")
+
+    assert Store(tmp_path).count_for(user["id"]) == 1
+
+
+def test_startup_backfill_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setenv("SDA_DATA_DIR", str(tmp_path))
+    create_app()
+    create_app()
+    store = Store(tmp_path)
+    user = store.get_paddler_by_email("rpf@funston.com")
+    assert store.count_for(user["id"]) == 1
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -344,14 +379,26 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'app.auth'`.
 through `os.open(..., O_CREAT | O_EXCL | O_WRONLY, 0o600)` so the file is never
 briefly world-readable.
 
+**On `FileExistsError`, re-read the file and return its contents** rather than
+generating a new key. `wsgi.py` calls `create_app()` at import and the unit runs
+`gunicorn --workers 2` with no `--preload`, so two processes reach this code
+independently on a cold start. Without the re-read, both write a key, the loser's
+in-memory key no longer matches the file, and about half of all sign-ins are
+issued a cookie the other worker rejects — a bug that cannot reproduce in tests,
+which build a single in-process app.
+
 `current_paddler()` reads `session["user_id"]` and `session["epoch"]`, fetches the
 row, and returns `None` unless the row exists, `is_active` is truthy, and the
 stored `session_epoch` matches the cookie's `epoch`. This single function is what
 implements Review Focus items 1 and 2.
 
 `login_paddler` writes both keys and calls `session.permanent = True`.
-`login_required` redirects with `url_for("sda.login", next=request.full_path)`;
-`admin_required` returns `abort(403)`.
+`login_required` redirects with `url_for("sda.login", next=request.full_path)`.
+
+`admin_required` resolves the signed-in paddler **first**: if there is none it
+behaves exactly like `login_required` (302 to `/login`), and only a signed-in
+paddler who is not an admin gets `abort(403)`. A naive `403 unless is_admin`
+answers anonymous requests with 403 and tells a stranger the route exists.
 
 - [ ] **Step 4: Wire the secret key into config and the factory**
 
@@ -359,6 +406,13 @@ implements Review Focus items 1 and 2.
 insecure default**. In `create_app`, after the store is built, set
 `app.config["SECRET_KEY"] = load_secret_key(config_object.DATA_DIR)` when the
 env var is unset, and `app.permanent_session_lifetime = timedelta(hours=12)`.
+
+Also set `app.config["SESSION_COOKIE_SAMESITE"] = "Lax"` and
+`app.config["SESSION_COOKIE_HTTPONLY"] = True` explicitly. Flask's `HttpOnly`
+default is already true, but its `SameSite` default is to emit no attribute at
+all, leaving the behaviour to whichever browser is asking. Setting `Lax` is what
+actually stops a cross-site form post from carrying the session cookie, and it
+costs one line rather than a token library.
 
 Flask re-issues the cookie on every request for a permanent session whenever
 `SESSION_REFRESH_EACH_REQUEST` is true — that is what makes the 12 hours slide
@@ -466,7 +520,7 @@ Expected: FAIL — 404 from `/login`.
 
 `GET /login` renders `login.html` with `next` from `request.args`. `POST /login`
 calls `store.verify_paddler(email, password)`; on success calls `login_paddler`
-and redirects to `next` **only if it starts with `/`** (otherwise `/`), on failure
+and redirects to `next` **only when it is a safe local path**, on failure
 re-renders with a single generic message — never "no such user" versus "wrong
 password", which would let anyone enumerate accounts. `POST /logout` calls
 `logout_paddler()` and redirects to `login`.
@@ -566,8 +620,25 @@ Expected: FAIL — the index shows another paddler's session.
 - [ ] **Step 3: Apply `@login_required` and scope the reads**
 
 `index` → `store.list_for(user["id"])` and `store.count_for(user["id"])`.
+
 `activity`, `download`, `delete` → `store.get_for(activity_id, user["id"])`,
-`abort(404)` when `None`. `healthz` stays public.
+`abort(404)` when `None`.
+
+`healthz` stays public but drops `activities` from its payload — a global count
+readable by any anonymous caller is exactly what the visibility rule exists to
+prevent. Add to `tests/test_visibility.py`:
+
+```python
+def test_healthz_does_not_leak_the_global_count(client, store, saved_activity):
+    body = client.get("/healthz").get_json()
+    assert body == {"ok": True}
+
+
+def test_index_count_is_scoped_to_the_paddler(signed_in, store, saved_activity, another_activity):
+    """another_activity belongs to nobody, so the header must say 1, not 2."""
+    store.link_paddler(saved_activity, signed_in.paddler["id"])
+    assert b"1" in signed_in.get("/").data
+```
 
 - [ ] **Step 4: Make upload link the uploader**
 
