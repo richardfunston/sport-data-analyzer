@@ -53,6 +53,11 @@ def create_app(config_object: type[Config] = Config) -> Flask:
 
     register_filters(app)
 
+    # Every template can ask who is signed in, so the header can name them.
+    from .auth import current_paddler
+
+    app.jinja_env.globals["current_paddler"] = current_paddler
+
     from .routes import bp
 
     app.register_blueprint(bp)

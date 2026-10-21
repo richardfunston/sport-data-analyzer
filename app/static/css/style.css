@@ -342,3 +342,102 @@ tbody tr:hover { background: var(--panel-2); }
   .stat-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
   .stat .v { font-size: 1.22rem; }
 }
+
+/* -- accounts ------------------------------------------------------------ */
+
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 14px;
+  margin-left: auto;
+}
+
+.inline-form {
+  display: inline;
+  margin: 0;
+}
+
+.topnav .who {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The sign-out control is a POST, so it must look like the other links. */
+.topnav button.link-muted {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.topnav button.link-muted:hover {
+  color: var(--accent);
+}
+
+.auth-card {
+  max-width: 360px;
+  margin: 48px auto;
+  padding: 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.auth-card h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.auth-sub {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.auth-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hot);
+  background: color-mix(in srgb, var(--hot) 14%, transparent);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-form label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-form input[type="email"],
+.auth-form input[type="password"] {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+}
+
+.auth-form button {
+  margin-top: 6px;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

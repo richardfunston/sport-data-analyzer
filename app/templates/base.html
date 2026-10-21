@@ -15,7 +15,18 @@
       <span class="brand-mark">▲</span>
       <span>Sport Data Analyzer</span>
     </a>
-    <a class="link-muted" href="{{ url_for('sda.healthz') }}">status</a>
+    <nav class="topnav">
+      {% set me = current_paddler() %}
+      {% if me %}
+        <span class="who" title="{{ me.email }}">{{ me.name }}</span>
+        <form method="post" action="{{ url_for('sda.logout') }}" class="inline-form">
+          <button type="submit" class="link-muted">sign out</button>
+        </form>
+      {% else %}
+        <a class="link-muted" href="{{ url_for('sda.login') }}">sign in</a>
+      {% endif %}
+      <a class="link-muted" href="{{ url_for('sda.healthz') }}">status</a>
+    </nav>
   </header>
 
   <main class="wrap">

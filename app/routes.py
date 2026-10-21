@@ -9,6 +9,7 @@ from flask import (
     abort,
     current_app,
     jsonify,
+    redirect,
     render_template,
     request,
     send_file,
@@ -16,6 +17,7 @@ from flask import (
 )
 
 from .analysis import REPORT_VERSION, build_report
+from .auth import current_paddler, login_paddler, login_required, logout_paddler
 from .basemaps import BASEMAPS
 from .fitio import FitError, parse_fit
 
@@ -24,6 +26,48 @@ bp = Blueprint("sda", __name__)
 
 def _store():
     return current_app.extensions["store"]
+
+
+def _safe_next(candidate: str | None) -> str:
+    """The post-sign-in destination, or the index when the value is not ours.
+
+    ``next`` is attacker-controlled. Checking only that it starts with ``/`` is
+    not enough: ``//evil.example/`` starts with a slash and a browser reads it as
+    protocol-relative, so the login page becomes an open redirector on a host
+    people are being trained to trust. Both ``//`` and ``/\\`` are refused.
+    """
+    if not candidate or not candidate.startswith("/"):
+        return url_for("sda.index")
+    if candidate.startswith("//") or candidate.startswith("/\\"):
+        return url_for("sda.index")
+    return candidate
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    next_target = request.form.get("next") or request.args.get("next") or ""
+    error = None
+    email = ""
+
+    if request.method == "POST":
+        email = request.form.get("email", "")
+        user = _store().verify_paddler(email, request.form.get("password", ""))
+        if user is None:
+            # Deliberately one message for an unknown account and for a wrong
+            # password: distinguishing them tells anyone which addresses exist.
+            error = "That email and password combination is incorrect."
+        else:
+            login_paddler(user)
+            return redirect(_safe_next(next_target))
+
+    return render_template("login.html", error=error, email=email, next=next_target)
+
+
+@bp.post("/logout")
+def logout():
+    """Sign out. Harmless when already signed out."""
+    logout_paddler()
+    return redirect(url_for("sda.login"))
 
 
 @bp.get("/")

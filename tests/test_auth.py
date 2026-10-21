@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from app.auth import (
     check_password,
     current_paddler,
@@ -159,3 +161,114 @@ def test_disabling_session_refresh_would_break_sliding(app):
 def test_cookie_is_samesite_lax_and_httponly(app):
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
     assert app.config["SESSION_COOKIE_HTTPONLY"] is True
+
+
+# -- signing in and out ------------------------------------------------------
+
+
+def test_login_page_renders(client):
+    response = client.get("/login")
+    assert response.status_code == 200
+    assert b"password" in response.data.lower()
+
+
+def test_login_with_correct_credentials_redirects_to_the_index(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+    response = client.post(
+        "/login", data={"email": "rpf@funston.com", "password": "8983498131"}
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+
+
+def test_login_accepts_the_email_however_it_is_typed(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    response = client.post(
+        "/login", data={"email": "  RPF@Funston.COM  ", "password": "pw"}
+    )
+    assert response.status_code == 302
+
+
+def test_login_honours_a_safe_next_parameter(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    response = client.post(
+        "/login",
+        data={"email": "rpf@funston.com", "password": "pw", "next": "/a/abc123"},
+    )
+    assert response.headers["Location"].endswith("/a/abc123")
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "//evil.example/",
+        "/\\evil.example",
+        "https://evil.example/login",
+        "http://evil.example",
+        "\\\\evil.example",
+        "javascript:alert(1)",
+    ],
+)
+def test_login_refuses_to_redirect_off_site(client, store, hostile):
+    """`next` is attacker-controlled: a bare 'starts with /' check lets //through."""
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    response = client.post(
+        "/login",
+        data={"email": "rpf@funston.com", "password": "pw", "next": hostile},
+    )
+    assert "evil.example" not in response.headers["Location"]
+    assert response.headers["Location"].endswith("/")
+
+
+def test_login_with_wrong_password_shows_one_generic_error(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    response = client.post("/login", data={"email": "rpf@funston.com", "password": "nope"})
+    assert response.status_code == 200
+    assert b"incorrect" in response.data.lower()
+
+
+def _without_echoed_input(response, submitted: str) -> bytes:
+    """The page with the form's echo of the user's own input removed.
+
+    The login form re-fills the email it was handed, so two failed attempts
+    always differ by that string. It is the caller's own input and says nothing
+    about whether the account exists, so it is scrubbed before comparing.
+    """
+    return response.data.replace(submitted.encode(), b"<email>")
+
+
+def test_login_does_not_reveal_whether_an_account_exists(client, store):
+    """No-such-user and wrong-password must be indistinguishable to the caller."""
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+
+    unknown = client.post("/login", data={"email": "nobody@funston.com", "password": "pw"})
+    wrong = client.post("/login", data={"email": "rpf@funston.com", "password": "nope"})
+
+    assert unknown.status_code == wrong.status_code == 200
+    assert b"incorrect" in unknown.data.lower()
+    assert _without_echoed_input(
+        unknown, "nobody@funston.com"
+    ) == _without_echoed_input(wrong, "rpf@funston.com")
+
+
+def test_login_rejects_a_deactivated_paddler(client, store):
+    user = store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.update_paddler(user["id"], is_active=False)
+    response = client.post("/login", data={"email": "rpf@funston.com", "password": "pw"})
+    assert response.status_code == 200
+    assert b"incorrect" in response.data.lower()
+
+
+def test_sign_out_clears_the_session(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    client.post("/login", data={"email": "rpf@funston.com", "password": "pw"})
+    with client.session_transaction() as sess:
+        assert sess.get("user_id")
+    client.post("/logout")
+    with client.session_transaction() as sess:
+        assert "user_id" not in sess
+
+
+def test_sign_out_when_already_signed_out_is_harmless(client):
+    response = client.post("/logout")
+    assert response.status_code == 302
