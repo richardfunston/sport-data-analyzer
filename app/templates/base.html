@@ -18,6 +18,9 @@
     <nav class="topnav">
       {% set me = current_paddler() %}
       {% if me %}
+        {% if me.is_admin %}
+        <a class="link-muted" href="{{ url_for('sda.admin_paddlers') }}">paddlers</a>
+        {% endif %}
         <span class="who" title="{{ me.email }}">{{ me.name }}</span>
         <form method="post" action="{{ url_for('sda.logout') }}" class="inline-form">
           <button type="submit" class="link-muted">sign out</button>

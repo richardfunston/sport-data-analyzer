@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Paddlers · Sport Data Analyzer{% endblock %}
+
+{% block content %}
+<h1>Paddlers</h1>
+<p class="subtitle">
+  Accounts that can sign in. Each one sees only the sessions they are linked to.
+</p>
+
+{% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+
+<div class="card">
+  <h2>Add a paddler</h2>
+  <form method="post" action="{{ url_for('sda.admin_paddler_new') }}" class="admin-form">
+    <label for="new-name">Name</label>
+    <input id="new-name" name="name" type="text" value="{{ form.name or '' }}"
+           autocomplete="off" required>
+
+    <label for="new-email">Email</label>
+    <input id="new-email" name="email" type="email" value="{{ form.email or '' }}"
+           autocomplete="off" autocapitalize="none" spellcheck="false" required>
+
+    <label for="new-password">Password</label>
+    <input id="new-password" name="password" type="password"
+           autocomplete="new-password" required>
+
+    <label class="check">
+      <input type="checkbox" name="is_admin" value="1"> Admin
+    </label>
+
+    <button type="submit">Add paddler</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>
+    Everyone
+    {% if paddlers %}<span class="subtitle" style="margin:0">({{ paddlers | length }})</span>{% endif %}
+  </h2>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Set a new password</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for p in paddlers %}
+        <tr>
+          <td>
+            {{ p.name }}
+            {% if p.id == me.id %}<span class="tag">you</span>{% endif %}
+          </td>
+          <td>{{ p.email }}</td>
+          <td>
+            {{ 'admin' if p.is_admin else 'paddler' }}
+            {%- if not p.is_active %} · <span class="muted">inactive</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" class="inline-form"
+                  action="{{ url_for('sda.admin_paddler_password', user_id=p.id) }}">
+              <input name="password" type="password" autocomplete="new-password"
+                     placeholder="new password" required>
+              <button type="submit" class="btn ghost small">Change</button>
+            </form>
+          </td>
+          <td class="admin-actions">
+            <form method="post" class="inline-form"
+                  action="{{ url_for('sda.admin_paddler_update', user_id=p.id) }}">
+              <input type="hidden" name="is_admin" value="{{ 0 if p.is_admin else 1 }}">
+              <button type="submit" class="btn ghost small">
+                {{ 'demote' if p.is_admin else 'make admin' }}
+              </button>
+            </form>
+            <form method="post" class="inline-form"
+                  action="{{ url_for('sda.admin_paddler_update', user_id=p.id) }}">
+              <input type="hidden" name="is_active" value="{{ 0 if p.is_active else 1 }}">
+              <button type="submit" class="btn ghost small">
+                {{ 'deactivate' if p.is_active else 'reactivate' }}
+              </button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="subtitle" style="margin:14px 0 0">
+    Changing a password signs that paddler out everywhere. The last active admin
+    cannot be demoted or deactivated — that would lock everyone out of this page.
+  </p>
+</div>
+{% endblock %}

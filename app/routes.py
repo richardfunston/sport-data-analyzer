@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from flask import (
@@ -17,9 +18,16 @@ from flask import (
 )
 
 from .analysis import REPORT_VERSION, build_report
-from .auth import current_paddler, login_paddler, login_required, logout_paddler
+from .auth import (
+    admin_required,
+    current_paddler,
+    login_paddler,
+    login_required,
+    logout_paddler,
+)
 from .basemaps import BASEMAPS
 from .fitio import FitError, parse_fit
+from .storage import DuplicateEmail
 
 bp = Blueprint("sda", __name__)
 
@@ -251,6 +259,136 @@ def session_paddlers(activity_id: str):
             ],
         }
     )
+
+
+# -- the admin screen --------------------------------------------------------
+
+
+def _render_admin(store, *, error=None, notice=None, form=None, status=200):
+    return (
+        render_template(
+            "admin_paddlers.html",
+            paddlers=store.list_paddlers(),
+            me=current_paddler(),
+            error=error,
+            notice=notice,
+            form=form or {},
+        ),
+        status,
+    )
+
+
+def _usable_email(candidate: str) -> bool:
+    """Enough of a check that a typo cannot quietly become an account."""
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", candidate.strip()))
+
+
+@bp.get("/admin/paddlers")
+@admin_required
+def admin_paddlers():
+    return _render_admin(
+        _store(),
+        error=request.args.get("error"),
+        notice=request.args.get("notice"),
+    )
+
+
+@bp.post("/admin/paddlers/new")
+@admin_required
+def admin_paddler_new():
+    store = _store()
+    name = (request.form.get("name") or "").strip()
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+    form = {"name": name, "email": email}
+
+    if not name:
+        return _render_admin(store, error="A name is required.", form=form)
+    if not _usable_email(email):
+        return _render_admin(
+            store, error="That does not look like an email address.", form=form
+        )
+    if not password:
+        return _render_admin(store, error="A password is required.", form=form)
+
+    try:
+        store.create_paddler(
+            email,
+            name,
+            password,
+            is_admin=request.form.get("is_admin") == "1",
+        )
+    except DuplicateEmail:
+        return _render_admin(
+            store,
+            error="There is already a paddler with that email address.",
+            form=form,
+        )
+
+    return redirect(url_for("sda.admin_paddlers", notice=f"{name} can sign in now."))
+
+
+@bp.post("/admin/paddlers/<user_id>/password")
+@admin_required
+def admin_paddler_password(user_id: str):
+    store = _store()
+    target = store.get_paddler(user_id)
+    if target is None:
+        abort(404)
+
+    password = request.form.get("password") or ""
+    if not password:
+        return _render_admin(store, error="A password is required.")
+
+    # set_password bumps session_epoch, so this evicts every session already
+    # open for that paddler rather than leaving a stale cookie valid.
+    store.set_password(user_id, password)
+    return redirect(
+        url_for("sda.admin_paddlers", notice=f"Password changed for {target['name']}.")
+    )
+
+
+@bp.post("/admin/paddlers/<user_id>/update")
+@admin_required
+def admin_paddler_update(user_id: str):
+    store = _store()
+    target = store.get_paddler(user_id)
+    if target is None:
+        abort(404)
+
+    name = request.form.get("name")
+    wants_admin = request.form.get("is_admin")
+    wants_active = request.form.get("is_active")
+
+    # Refuse the change that would leave nobody able to reach this screen.
+    # There is no way back in through the UI once it happens.
+    demoting = wants_admin == "0"
+    deactivating = wants_active == "0"
+    if (demoting or deactivating) and target["is_admin"] and target["is_active"]:
+        if store.count_admins(active_only=True) <= 1:
+            abort(
+                400,
+                description=(
+                    "That would leave no active admin, and there would be no way "
+                    "back into this screen."
+                ),
+            )
+
+    fields: dict[str, Any] = {}
+    if name is not None:
+        cleaned = name.strip()
+        if not cleaned:
+            abort(400, description="A name is required.")
+        fields["name"] = cleaned
+    if wants_admin is not None:
+        fields["is_admin"] = wants_admin == "1"
+    if wants_active is not None:
+        fields["is_active"] = wants_active == "1"
+
+    if fields:
+        store.update_paddler(user_id, **fields)
+
+    return redirect(url_for("sda.admin_paddlers", notice=f"{target['name']} updated."))
 
 
 @bp.get("/healthz")

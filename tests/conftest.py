@@ -100,6 +100,14 @@ def signed_in(client, store):
 
 
 @pytest.fixture()
+def admin_client(client, store):
+    """The same, for an admin."""
+    return sign_in(
+        client, store.create_paddler("admin@funston.com", "Admin", "pw", is_admin=True)
+    )
+
+
+@pytest.fixture()
 def another_activity(store):
     """A second saved activity, linked to nobody."""
     record, _ = store.save(
