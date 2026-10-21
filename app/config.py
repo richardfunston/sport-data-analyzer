@@ -19,6 +19,9 @@ class Config:
     #: Reject uploads larger than this. Wahoo files are well under 5 MB.
     MAX_CONTENT_LENGTH = int(os.environ.get("SDA_MAX_UPLOAD_BYTES", 64 * 1024 * 1024))
 
-    SECRET_KEY = os.environ.get("SDA_SECRET_KEY", "sport-data-analyzer")
+    #: Session signing key. Deliberately has no default: a key committed to the
+    #: source is public, so anyone who reads the repository could forge a login
+    #: cookie. ``create_app`` falls back to a generated, persisted key.
+    SDA_SECRET_KEY = os.environ.get("SDA_SECRET_KEY")
 
     JSON_SORT_KEYS = False

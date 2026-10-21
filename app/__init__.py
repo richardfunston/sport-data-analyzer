@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -24,6 +26,19 @@ def create_app(config_object: type[Config] = Config) -> Flask:
 
     store = Store(config_object.DATA_DIR)
     app.extensions["store"] = store
+
+    # Session cookies are signed with this, so it must be a real secret and must
+    # be identical across gunicorn workers. See load_secret_key for the race it
+    # guards against.
+    from .auth import SESSION_HOURS, load_secret_key
+
+    app.config["SECRET_KEY"] = load_secret_key(config_object.DATA_DIR)
+    app.permanent_session_lifetime = timedelta(hours=SESSION_HOURS)
+    # Flask's default emits no SameSite attribute at all, leaving cross-site
+    # cookie behaviour to whichever browser is asking. Lax is what actually
+    # stops a cross-site form post from carrying the session.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
 
     # Adopt any activity that has no paddler at all. Unconditional and
     # idempotent, on every startup: an unowned session is invisible to every
