@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from flask import abort, current_app, redirect, request, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 __all__ = [
@@ -42,12 +43,41 @@ _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def usable_email(candidate: str) -> bool:
     return bool(_EMAIL_PATTERN.match((candidate or "").strip()))
 
+
+class SchemeAwareSession(SecureCookieSessionInterface):
+    """Mark the session cookie ``Secure`` exactly when the request was HTTPS.
+
+    One gunicorn process serves the public hostname over HTTPS *and* the plain
+    HTTP LAN path mount, so a static flag cannot serve both: ``Secure`` on means
+    a browser never sends the cookie back over the LAN route and sign-in there
+    breaks; ``Secure`` off means a 12-hour session cookie travels in the clear
+    on the public host.
+
+    Following the scheme gives each route what it needs with no configuration
+    and no way to get it wrong. ``SESSION_COOKIE_SECURE = True`` still forces it
+    on for a deployment that is HTTPS-only.
+    """
+
+    def get_cookie_secure(self, app) -> bool:  # type: ignore[override]
+        if app.config.get("SESSION_COOKIE_SECURE"):
+            return True
+        return bool(request.is_secure)
+
 #: Name of the key file inside the data directory.
 SECRET_KEY_FILENAME = "secret_key"
 
 #: How long a session lasts. Flask re-issues the cookie on each request while
 #: SESSION_REFRESH_EACH_REQUEST is true, so this slides.
 SESSION_HOURS = 12
+
+#: Failed sign-ins allowed from one address against one account inside the
+#: window before that pair is throttled.
+#:
+#: Keyed on (email, address) rather than either alone: keying on address alone
+#: lets a shared NAT lock out everyone behind it, and keying on email alone
+#: lets a stranger lock a known paddler out of their own account.
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
 
 
 # -- passwords ---------------------------------------------------------------

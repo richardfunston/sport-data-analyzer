@@ -14,6 +14,7 @@ from datetime import timedelta
 import pytest
 
 from app.auth import (
+    LOGIN_MAX_FAILURES,
     check_password,
     current_paddler,
     hash_password,
@@ -21,6 +22,7 @@ from app.auth import (
     login_paddler,
     logout_paddler,
 )
+from app.storage import Store
 
 
 # -- passwords ---------------------------------------------------------------
@@ -163,6 +165,28 @@ def test_cookie_is_samesite_lax_and_httponly(app):
     assert app.config["SESSION_COOKIE_HTTPONLY"] is True
 
 
+def test_the_cookie_is_secure_over_https_and_plain_over_http(client, store):
+    """One process serves both an HTTPS host and a plain-HTTP LAN mount.
+
+    A static flag cannot serve both: `Secure` on breaks LAN sign-in over HTTP,
+    `Secure` off means a 12-hour session cookie travels in the clear on the
+    public host. It follows the scheme the request actually arrived over.
+    """
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    credentials = {"email": "rpf@funston.com", "password": "pw"}
+
+    over_https = client.post("/login", data=credentials, base_url="https://paddle.funston.com")
+    assert "Secure" in over_https.headers["Set-Cookie"]
+
+    over_http = client.post("/login", data=credentials, base_url="http://192.168.10.45/sport")
+    assert "Secure" not in over_http.headers["Set-Cookie"]
+
+
+def test_cookie_secure_can_be_forced_on(app):
+    """Off by default so the LAN HTTP mount keeps working; overridable."""
+    assert app.config["SESSION_COOKIE_SECURE"] is False
+
+
 # -- signing in and out ------------------------------------------------------
 
 
@@ -272,3 +296,69 @@ def test_sign_out_clears_the_session(client, store):
 def test_sign_out_when_already_signed_out_is_harmless(client):
     response = client.post("/logout")
     assert response.status_code == 302
+
+
+# -- throttling --------------------------------------------------------------
+
+
+def _try(client, password, email="rpf@funston.com", ip=None):
+    extra = {"environ_base": {"REMOTE_ADDR": ip}} if ip else {}
+    return client.post(
+        "/login", data={"email": email, "password": password}, **extra
+    )
+
+
+def test_repeated_failures_are_throttled(client, store):
+    """The admin password is ten numeric digits, so an unthrottled public login
+    is 10^10 guesses away from the account."""
+    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+
+    for _ in range(LOGIN_MAX_FAILURES):
+        assert _try(client, "wrong").status_code == 200
+
+    blocked = _try(client, "8983498131")
+    assert blocked.status_code == 429
+    assert b"too many" in blocked.data.lower()
+
+
+def test_throttling_does_not_lock_out_a_different_address(client, store):
+    """A stranger must not be able to lock the real paddler out of their account."""
+    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+
+    for _ in range(LOGIN_MAX_FAILURES + 1):
+        _try(client, "wrong", ip="10.9.9.9")
+
+    assert _try(client, "8983498131", ip="10.1.1.1").status_code == 302
+
+
+def test_a_successful_login_clears_the_failures(client, store):
+    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+
+    for _ in range(LOGIN_MAX_FAILURES - 1):
+        _try(client, "wrong")
+    assert _try(client, "8983498131").status_code == 302
+
+    # The slate is clean, so a fresh run of failures is needed to throttle again.
+    for _ in range(LOGIN_MAX_FAILURES - 1):
+        assert _try(client, "wrong").status_code == 200
+    assert _try(client, "8983498131").status_code == 302
+
+
+def test_a_failed_login_is_logged(client, store, caplog):
+    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    with caplog.at_level("WARNING"):
+        _try(client, "wrong")
+    assert any("rpf@funston.com" in r.message for r in caplog.records)
+
+
+def test_the_throttle_survives_a_restart(tmp_path):
+    """Two gunicorn workers, so an in-process counter would halve the limit."""
+    store = Store(tmp_path / "data")
+    assert store.count_recent_login_failures("a@funston.com", "1.2.3.4", 900) == 0
+    store.record_login_failure("a@funston.com", "1.2.3.4")
+    store.record_login_failure("a@funston.com", "1.2.3.4")
+    assert store.count_recent_login_failures("a@funston.com", "1.2.3.4", 900) == 2
+    # A different address is counted separately.
+    assert store.count_recent_login_failures("a@funston.com", "5.6.7.8", 900) == 0
+    store.clear_login_failures("a@funston.com", "1.2.3.4")
+    assert store.count_recent_login_failures("a@funston.com", "1.2.3.4", 900) == 0

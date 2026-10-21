@@ -73,6 +73,11 @@ def create_app(config_object: type[Config] = Config) -> Flask:
     # stops a cross-site form post from carrying the session.
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
+    # Secure follows the request scheme: the public host is HTTPS, the LAN mount
+    # is plain HTTP, and one process serves both. See SchemeAwareSession.
+    from .auth import SchemeAwareSession
+
+    app.session_interface = SchemeAwareSession()
 
     # Adopt any activity that has no paddler at all. Unconditional and
     # idempotent, on every startup: an unowned session is invisible to every

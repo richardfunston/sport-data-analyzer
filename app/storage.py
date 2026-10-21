@@ -15,7 +15,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS activity_paddlers (
     PRIMARY KEY (activity_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS activity_paddlers_user ON activity_paddlers (user_id);
+
+-- Failed sign-ins, so the login route can throttle. Deliberately in SQLite
+-- rather than in process memory: gunicorn runs two workers with no --preload,
+-- so an in-process counter would give an attacker twice the attempts and reset
+-- on every restart.
+CREATE TABLE IF NOT EXISTS login_failures (
+    email TEXT NOT NULL,
+    ip    TEXT NOT NULL,
+    at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS login_failures_lookup
+    ON login_failures (email, ip, at);
 """
 
 
@@ -423,15 +435,25 @@ class Store:
         return dict(row) if row else None
 
     def backfill_paddlers(self, user_id: str) -> int:
-        """Link every activity that has no paddler at all to ``user_id``.
+        """Link every activity with no *active* paddler to ``user_id``.
 
         Idempotent: a second run inserts nothing. Returns the number adopted.
+
+        "No active paddler" rather than "no paddler at all", because
+        deactivating the only paddler on a session reaches the same dead end by
+        another route. The link row survives the deactivation, so a narrower
+        test would never adopt it and the session would be invisible to every
+        account - indistinguishable from having lost it.
         """
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO activity_paddlers (activity_id, user_id)"
+                "INSERT OR IGNORE INTO activity_paddlers (activity_id, user_id)"
                 " SELECT id, ? FROM activities"
-                " WHERE id NOT IN (SELECT activity_id FROM activity_paddlers)",
+                " WHERE id NOT IN ("
+                "   SELECT ap.activity_id FROM activity_paddlers ap"
+                "   JOIN users u ON u.id = ap.user_id"
+                "   WHERE u.is_active = 1"
+                ")",
                 (user_id,),
             )
             conn.commit()
@@ -469,6 +491,45 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # -- failed sign-ins ---------------------------------------------------
+
+    def record_login_failure(self, email: str, ip: str) -> None:
+        """Note a failed sign-in. Prunes anything older than a day on the way."""
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO login_failures (email, ip, at) VALUES (?, ?, ?)",
+                (self._normalise_email(email), ip, now.isoformat()),
+            )
+            conn.execute(
+                "DELETE FROM login_failures WHERE at < ?",
+                ((now - timedelta(days=1)).isoformat(),),
+            )
+            conn.commit()
+
+    def count_recent_login_failures(
+        self, email: str, ip: str, window_seconds: int
+    ) -> int:
+        since = (
+            datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+        ).isoformat()
+        with self._connect() as conn:
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM login_failures"
+                    " WHERE email = ? AND ip = ? AND at >= ?",
+                    (self._normalise_email(email), ip, since),
+                ).fetchone()[0]
+            )
+
+    def clear_login_failures(self, email: str, ip: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM login_failures WHERE email = ? AND ip = ?",
+                (self._normalise_email(email), ip),
+            )
+            conn.commit()
+
     # -- reads scoped to one paddler ---------------------------------------
 
     _SCOPED_SELECT = (
@@ -500,10 +561,20 @@ class Store:
         return dict(row) if row else None
 
     def count_for(self, user_id: str) -> int:
+        """How many activities this paddler can actually see.
+
+        Joined through ``activities`` rather than counting link rows, so it
+        agrees with :meth:`list_for` even if a link outlives its activity. A
+        link row can survive a hand-run delete, because the sqlite3 CLI leaves
+        ``PRAGMA foreign_keys`` off - and then the header would claim sessions
+        the list beneath it does not show.
+        """
         with self._connect() as conn:
             return int(
                 conn.execute(
-                    "SELECT COUNT(*) FROM activity_paddlers WHERE user_id = ?",
+                    "SELECT COUNT(*) FROM activities a"
+                    " JOIN activity_paddlers ap ON ap.activity_id = a.id"
+                    " WHERE ap.user_id = ?",
                     (user_id,),
                 ).fetchone()[0]
             )

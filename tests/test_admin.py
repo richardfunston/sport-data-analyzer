@@ -7,7 +7,7 @@ is no way back in through the UI.
 
 from __future__ import annotations
 
-from conftest import sign_in
+from conftest import minimal_report, sign_in
 
 
 # -- who may reach it --------------------------------------------------------
@@ -200,6 +200,73 @@ def test_the_admin_deactivates_a_second_paddler(admin_client, store):
 
 def test_an_update_for_an_unknown_paddler_is_404(admin_client):
     assert admin_client.post("/admin/paddlers/nosuchid/update", data={}).status_code == 404
+
+
+def test_deactivating_a_sole_owner_does_not_lose_their_sessions(
+    admin_client, store, app
+):
+    """Deactivation is the one admin action that can orphan a session.
+
+    Removing the last paddler is refused outright, precisely because an unowned
+    session is invisible to everyone. Deactivating its only paddler reaches the
+    same state by another route - and the link row survives, so the startup
+    backfill (which looks for no link at all) would not adopt it either. The
+    sessions must be re-homed rather than quietly disappearing.
+    """
+    owner = store.create_paddler("owner@funston.com", "Owner", "pw")
+    record, _ = store.save("theirs.fit", b"\x00theirs", minimal_report())
+    store.link_paddler(record["id"], owner["id"])
+    admin = admin_client.paddler
+
+    # Before: the admin cannot see it.
+    assert store.get_for(record["id"], admin["id"]) is None
+
+    response = admin_client.post(
+        f"/admin/paddlers/{owner['id']}/update", data={"is_active": "0"}
+    )
+    assert response.status_code == 302
+
+    assert store.get_paddler(owner["id"])["is_active"] == 0
+    # After: the session is still reachable by somebody.
+    assert store.get_for(record["id"], admin["id"]) is not None
+    assert record["id"] in [r["id"] for r in store.list_for(admin["id"])]
+    assert "reassign" in response.headers["Location"].lower()
+
+
+def test_reactivating_a_paddler_keeps_them_on_their_sessions(
+    app, store, admin_client
+):
+    """Re-homing shares the session; it does not take it off the original owner."""
+    owner = store.create_paddler("owner@funston.com", "Owner", "pw")
+    record, _ = store.save("theirs.fit", b"\x00theirs", minimal_report())
+    store.link_paddler(record["id"], owner["id"])
+
+    admin_client.post(f"/admin/paddlers/{owner['id']}/update", data={"is_active": "0"})
+    admin_client.post(f"/admin/paddlers/{owner['id']}/update", data={"is_active": "1"})
+
+    assert store.get_for(record["id"], owner["id"]) is not None
+    assert len(store.paddlers_for(record["id"])) == 2
+
+
+def test_deactivating_someone_whose_sessions_are_shared_is_quiet(
+    admin_client, store, app
+):
+    """No re-homing is needed when another active paddler is already on it."""
+    owner = store.create_paddler("owner@funston.com", "Owner", "pw")
+    mate = store.create_paddler("mate@funston.com", "Mate", "pw")
+    record, _ = store.save("shared.fit", b"\x00shared", minimal_report())
+    store.link_paddler(record["id"], owner["id"])
+    store.link_paddler(record["id"], mate["id"])
+    admin = admin_client.paddler
+
+    response = admin_client.post(
+        f"/admin/paddlers/{owner['id']}/update", data={"is_active": "0"}
+    )
+
+    assert response.status_code == 302
+    assert store.get_for(record["id"], admin["id"]) is None
+    assert "reassign" not in response.headers["Location"].lower()
+    assert store.get_for(record["id"], mate["id"]) is not None
 
 
 # -- the lockout guards ------------------------------------------------------

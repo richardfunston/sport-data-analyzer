@@ -146,7 +146,7 @@ After that an admin manages everyone at `/admin/paddlers`: create paddlers,
 change passwords, promote or deactivate. Each report page carries a paddlers card
 for sharing that session with someone else.
 
-Four things worth knowing:
+Six things worth knowing:
 
 - **A password change signs that paddler out everywhere.** The cookie carries a
   `session_epoch`; changing the password bumps it, so a stolen cookie does not
@@ -158,9 +158,24 @@ Four things worth knowing:
   everyone out of the admin screen with no way back in through the UI.
 - **Sharing is explicit.** Being signed in grants nothing on its own; an unlinked
   session answers `404` rather than `403`, because a `403` confirms it exists.
+- **Failed sign-ins are throttled per account *and* per address.** Five failures
+  from one address against one account inside fifteen minutes answer `429`. Keyed
+  on the pair rather than either alone: address alone lets a shared NAT lock out
+  everyone behind it, and email alone lets a stranger lock a known paddler out of
+  their own account. The count lives in SQLite, not in memory — gunicorn runs two
+  workers with no `--preload`, so an in-process counter would hand an attacker
+  twice the attempts and forget on every restart.
+- **Deactivating the last paddler on a session re-homes it, not orphans it.** The
+  sessions that would otherwise become invisible to every account are reassigned
+  to the admin doing the deactivating, and the screen says how many. The same
+  dead end is why removing the last paddler from a session is refused outright.
 
-Sessions last 12 hours and slide on each request. Passwords are stored as scrypt
-hashes — never in plain text, and the first one is never committed.
+Sessions last 12 hours and slide on each request. The session cookie is marked
+`Secure` whenever the request itself was HTTPS, so the public hostname never
+sends it in the clear while the plain-HTTP LAN mount still works; set
+`SESSION_COOKIE_SECURE=True` to force it on for an HTTPS-only deployment.
+Passwords are stored as scrypt hashes — never in plain text, and the first one is
+never committed.
 
 ## HTTP surface
 

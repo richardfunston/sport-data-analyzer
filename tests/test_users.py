@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from app import create_app
@@ -133,6 +135,43 @@ def test_backfill_links_only_unlinked_activities(store):
     # A second run finds nothing left to adopt.
     assert store.backfill_paddlers(richard["id"]) == 0
     assert store.backfill_paddlers(other["id"]) == 0
+
+
+def test_deleting_an_activity_cascades_every_link(store):
+    """A shared session's links must all go with it, not just the first."""
+    a = store.create_paddler("a@funston.com", "A", "pw")
+    b = store.create_paddler("b@funston.com", "B", "pw")
+    record, _ = store.save("shared.fit", b"\x00shared", minimal_report())
+    store.link_paddler(record["id"], a["id"])
+    store.link_paddler(record["id"], b["id"])
+    assert len(store.paddlers_for(record["id"])) == 2
+
+    assert store.delete(record["id"]) is True
+
+    assert store.paddlers_for(record["id"]) == []
+    assert store.count_for(a["id"]) == 0
+    assert store.count_for(b["id"]) == 0
+
+
+def test_count_for_ignores_a_link_whose_activity_is_gone(store, saved_activity):
+    """count_for must join activities, or a stale link row inflates the header.
+
+    The sqlite3 CLI leaves PRAGMA foreign_keys OFF, so clearing rows by hand is
+    the natural way a link outlives its activity. Deriving the count from the
+    join rows alone then makes the header disagree with the list beneath it -
+    which is the bug the scoped count existed to prevent.
+    """
+    user = store.create_paddler("a@funston.com", "A", "pw")
+    store.link_paddler(saved_activity, user["id"])
+    assert store.count_for(user["id"]) == 1
+
+    raw = sqlite3.connect(store.db_path)  # foreign_keys defaults to OFF
+    raw.execute("DELETE FROM activities WHERE id = ?", (saved_activity,))
+    raw.commit()
+    raw.close()
+
+    assert store.list_for(user["id"]) == []
+    assert store.count_for(user["id"]) == 0
 
 
 def test_count_admins(store):

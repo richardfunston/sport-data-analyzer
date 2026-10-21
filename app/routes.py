@@ -18,6 +18,8 @@ from flask import (
 
 from .analysis import REPORT_VERSION, build_report
 from .auth import (
+    LOGIN_MAX_FAILURES,
+    LOGIN_WINDOW_SECONDS,
     admin_required,
     current_paddler,
     login_paddler,
@@ -59,12 +61,36 @@ def login():
 
     if request.method == "POST":
         email = request.form.get("email", "")
-        user = _store().verify_paddler(email, request.form.get("password", ""))
+        store = _store()
+        address = request.remote_addr or "unknown"
+
+        if (
+            store.count_recent_login_failures(email, address, LOGIN_WINDOW_SECONDS)
+            >= LOGIN_MAX_FAILURES
+        ):
+            return (
+                render_template(
+                    "login.html",
+                    error="Too many failed attempts. Try again in a few minutes.",
+                    email=email,
+                    next=next_target,
+                ),
+                429,
+            )
+
+        user = store.verify_paddler(email, request.form.get("password", ""))
         if user is None:
+            store.record_login_failure(email, address)
+            # Logged so a run of failures is visible rather than silent. The
+            # submitted password is never logged.
+            current_app.logger.warning(
+                "failed sign-in for %s from %s", email, address
+            )
             # Deliberately one message for an unknown account and for a wrong
             # password: distinguishing them tells anyone which addresses exist.
             error = "That email and password combination is incorrect."
         else:
+            store.clear_login_failures(email, address)
             login_paddler(user)
             return redirect(_safe_next(next_target))
 
@@ -388,7 +414,22 @@ def admin_paddler_update(user_id: str):
     if fields:
         store.update_paddler(user_id, **fields)
 
-    return redirect(url_for("sda.admin_paddlers", notice=f"{target['name']} updated."))
+    notice = f"{target['name']} updated."
+
+    if fields.get("is_active") is False:
+        # Deactivating the only paddler on a session reaches the same dead end
+        # that removing the last paddler is refused for: the sessions go
+        # invisible to every account, and the link row survives so the startup
+        # backfill would not rescue them either. Re-home them instead.
+        moved = store.backfill_paddlers(current_paddler()["id"])
+        if moved:
+            plural = "" if moved == 1 else "s"
+            notice = (
+                f"{target['name']} deactivated. {moved} session{plural} reassigned "
+                "to you, because nobody active was left on them."
+            )
+
+    return redirect(url_for("sda.admin_paddlers", notice=notice))
 
 
 @bp.get("/healthz")
