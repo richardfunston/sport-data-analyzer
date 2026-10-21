@@ -168,7 +168,13 @@ def activity(activity_id: str):
         abort(404, description="no such activity")
 
     return render_template(
-        "activity.html", record=record, report=report, basemaps=BASEMAPS
+        "activity.html",
+        record=record,
+        report=report,
+        basemaps=BASEMAPS,
+        paddlers=store.paddlers_for(activity_id),
+        shareable=_paddler_choices(store, activity_id),
+        me=current_paddler(),
     )
 
 
@@ -196,6 +202,55 @@ def delete(activity_id: str):
     if not store.delete(activity_id):
         abort(404)
     return jsonify({"ok": True})
+
+
+def _paddler_choices(store, activity_id: str) -> list[dict[str, Any]]:
+    """Active paddlers not already on this session."""
+    linked = {p["id"] for p in store.paddlers_for(activity_id)}
+    return [
+        p for p in store.list_paddlers() if p["is_active"] and p["id"] not in linked
+    ]
+
+
+@bp.post("/api/a/<activity_id>/paddlers")
+@login_required
+def session_paddlers(activity_id: str):
+    """Share a session, or stop sharing it.
+
+    Any paddler already linked may do this: a shared session behaves like a
+    shared document, and the group is a household or club. Someone not linked
+    gets a 404 - they cannot tell the session exists, let alone edit it.
+    """
+    store = _store()
+    if store.get_for(activity_id, current_paddler()["id"]) is None:
+        abort(404)
+
+    payload = request.get_json(silent=True) or {}
+    add = payload.get("add")
+    remove = payload.get("remove")
+
+    if add:
+        if store.get_paddler(add) is None:
+            return jsonify({"error": "no such paddler"}), 400
+        store.link_paddler(activity_id, add)
+    elif remove:
+        if len(store.paddlers_for(activity_id)) <= 1:
+            # Refused rather than allowed: a session with no paddler is
+            # invisible to everyone, which is indistinguishable from lost.
+            return jsonify({"error": "a session must keep at least one paddler"}), 400
+        store.unlink_paddler(activity_id, remove)
+    else:
+        return jsonify({"error": "expected 'add' or 'remove'"}), 400
+
+    return jsonify(
+        {
+            "ok": True,
+            "paddlers": [
+                {"id": p["id"], "name": p["name"], "email": p["email"]}
+                for p in store.paddlers_for(activity_id)
+            ],
+        }
+    )
 
 
 @bp.get("/healthz")

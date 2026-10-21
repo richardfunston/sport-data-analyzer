@@ -613,4 +613,49 @@
         .catch(function () { window.alert("Could not delete the session."); });
     });
   }
+
+  // -- sharing the session with other paddlers -------------------------------
+  var paddlerList = document.getElementById("paddler-list");
+  if (paddlerList) {
+    var paddlerUrl = paddlerList.dataset.paddlerUrl;
+
+    function sharePaddler(body) {
+      return fetch(paddlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(function (response) {
+        if (response.ok) {
+          window.location.reload();
+          return;
+        }
+        return response
+          .json()
+          .catch(function () { return {}; })
+          .then(function (data) {
+            throw new Error(data.error || "Could not update the paddlers.");
+          });
+      });
+    }
+
+    var addButton = document.getElementById("add-paddler-btn");
+    var addSelect = document.getElementById("paddler-to-add");
+    if (addButton && addSelect) {
+      addButton.addEventListener("click", function () {
+        if (!addSelect.value) return;
+        sharePaddler({ add: addSelect.value }).catch(function (error) {
+          window.alert(error.message);
+        });
+      });
+    }
+
+    paddlerList.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-remove]");
+      if (!button) return;
+      if (!window.confirm("Remove this paddler from the session?")) return;
+      sharePaddler({ remove: button.dataset.remove }).catch(function (error) {
+        window.alert(error.message);
+      });
+    });
+  }
 })();

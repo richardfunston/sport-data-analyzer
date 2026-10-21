@@ -441,3 +441,52 @@ tbody tr:hover { background: var(--panel-2); }
   font-weight: 600;
   cursor: pointer;
 }
+
+.paddler-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.paddler {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.paddler-name { font-weight: 600; }
+
+.paddler-email {
+  color: var(--muted);
+  font-size: 13px;
+  margin-right: auto;
+}
+
+.paddler .tag {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.paddler-add { margin-top: 12px; }
+
+.paddler-add select {
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+}

@@ -163,3 +163,119 @@ def test_a_paddler_still_cannot_see_a_session_they_are_not_linked_to(
     store.link_paddler(saved_activity, a["id"])
 
     assert sign_in(app.test_client(), b).get(f"/a/{saved_activity}").status_code == 404
+
+
+# -- sharing a session -------------------------------------------------------
+
+
+def _two_paddlers(store):
+    a = store.create_paddler("a@funston.com", "Anna", "pw")
+    b = store.create_paddler("b@funston.com", "Ben", "pw")
+    return a, b
+
+
+def test_a_linked_paddler_can_add_another(app, store, saved_activity):
+    a, b = _two_paddlers(store)
+    store.link_paddler(saved_activity, a["id"])
+
+    response = sign_in(app.test_client(), a).post(
+        f"/api/a/{saved_activity}/paddlers", json={"add": b["id"]}
+    )
+
+    assert response.status_code == 200
+    assert store.get_for(saved_activity, b["id"]) is not None
+
+
+def test_adding_the_same_paddler_twice_is_harmless(app, store, saved_activity):
+    a, b = _two_paddlers(store)
+    store.link_paddler(saved_activity, a["id"])
+    client = sign_in(app.test_client(), a)
+
+    client.post(f"/api/a/{saved_activity}/paddlers", json={"add": b["id"]})
+    response = client.post(f"/api/a/{saved_activity}/paddlers", json={"add": b["id"]})
+
+    assert response.status_code == 200
+    assert len(store.paddlers_for(saved_activity)) == 2
+
+
+def test_a_linked_paddler_can_remove_another(app, store, saved_activity):
+    a, b = _two_paddlers(store)
+    store.link_paddler(saved_activity, a["id"])
+    store.link_paddler(saved_activity, b["id"])
+
+    response = sign_in(app.test_client(), a).post(
+        f"/api/a/{saved_activity}/paddlers", json={"remove": b["id"]}
+    )
+
+    assert response.status_code == 200
+    assert store.get_for(saved_activity, b["id"]) is None
+    assert store.get_for(saved_activity, a["id"]) is not None
+
+
+def test_cannot_remove_the_last_paddler(app, store, saved_activity):
+    """An unowned session is invisible to everyone - indistinguishable from lost."""
+    a = store.create_paddler("a@funston.com", "Anna", "pw")
+    store.link_paddler(saved_activity, a["id"])
+
+    response = sign_in(app.test_client(), a).post(
+        f"/api/a/{saved_activity}/paddlers", json={"remove": a["id"]}
+    )
+
+    assert response.status_code == 400
+    assert store.get_for(saved_activity, a["id"]) is not None
+
+
+def test_an_unlinked_paddler_cannot_share_someone_elses_session(
+    app, store, saved_activity
+):
+    a, b = _two_paddlers(store)
+    c = store.create_paddler("c@funston.com", "Cass", "pw")
+    store.link_paddler(saved_activity, a["id"])
+
+    response = sign_in(app.test_client(), c).post(
+        f"/api/a/{saved_activity}/paddlers", json={"add": b["id"]}
+    )
+
+    assert response.status_code == 404
+    assert store.get_for(saved_activity, b["id"]) is None
+
+
+def test_sharing_requires_signing_in(client, saved_activity):
+    assert client.post(f"/api/a/{saved_activity}/paddlers", json={}).status_code == 302
+
+
+def test_cannot_add_an_unknown_paddler(app, store, saved_activity):
+    a = store.create_paddler("a@funston.com", "Anna", "pw")
+    store.link_paddler(saved_activity, a["id"])
+
+    response = sign_in(app.test_client(), a).post(
+        f"/api/a/{saved_activity}/paddlers", json={"add": "nosuchid"}
+    )
+
+    assert response.status_code == 400
+    assert len(store.paddlers_for(saved_activity)) == 1
+
+
+def test_a_malformed_request_is_a_bad_request(app, store, saved_activity):
+    a = store.create_paddler("a@funston.com", "Anna", "pw")
+    store.link_paddler(saved_activity, a["id"])
+
+    response = sign_in(app.test_client(), a).post(
+        f"/api/a/{saved_activity}/paddlers", json={"neither": "add-nor-remove"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_the_report_page_lists_the_paddlers_and_offers_the_others(
+    app, store, real_activity
+):
+    a, b = _two_paddlers(store)
+    store.link_paddler(real_activity, a["id"])
+
+    body = sign_in(app.test_client(), a).get(f"/a/{real_activity}").data.decode()
+
+    assert "Anna" in body
+    assert "Ben" in body  # offered to add
+    assert f"/api/a/{real_activity}/paddlers" in body
+

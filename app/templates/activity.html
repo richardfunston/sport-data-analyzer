@@ -74,6 +74,40 @@
   <p class="subtitle" id="track-note" style="margin:10px 0 0"></p>
 </div>
 
+<div class="card" id="paddlers-card">
+  <h3>Paddlers</h3>
+  <p class="subtitle" style="margin:0 0 10px">
+    Everyone listed can see this session and share it with others.
+  </p>
+
+  <ul class="paddler-list" id="paddler-list"
+      data-paddler-url="{{ url_for('sda.session_paddlers', activity_id=record.id) }}">
+    {% for p in paddlers %}
+    <li class="paddler">
+      <span class="paddler-name">{{ p.name }}</span>
+      <span class="paddler-email">{{ p.email }}</span>
+      {% if p.id == me.id %}<span class="tag">you</span>{% endif %}
+      {% if paddlers | length > 1 %}
+      <button class="btn ghost small" data-remove="{{ p.id }}">remove</button>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if shareable %}
+  <div class="actions paddler-add">
+    <select id="paddler-to-add" aria-label="Paddler to add">
+      {% for p in shareable %}
+      <option value="{{ p.id }}">{{ p.name }} — {{ p.email }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn small" id="add-paddler-btn">Add paddler</button>
+  </div>
+  {% else %}
+  <p class="subtitle" style="margin:12px 0 0">Everyone already has this session.</p>
+  {% endif %}
+</div>
+
 <div class="card">
   <h3>File</h3>
   <div class="actions">
