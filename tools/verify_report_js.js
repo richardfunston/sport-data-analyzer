@@ -200,7 +200,13 @@ charts.forEach((c, i) => {
 });
 
 console.log("\nchecks:");
-check("title is populated", text("report-title").length > 0, text("report-title"));
+// The report title is rendered server-side in the configured display timezone,
+// so this harness has nothing to assert about it: it only executes report.js,
+// which deliberately does not rebuild that text. What matters here is that the
+// payload still carries the timestamp the server rendered from.
+check("payload carries a start time for the server-rendered title",
+  typeof data.meta.start_time === "string" && data.meta.start_time.length > 0,
+  String(data.meta.start_time));
 check("subtitle names the sport and device",
   text("report-subtitle").length > 0
   && text("report-subtitle").toLowerCase()

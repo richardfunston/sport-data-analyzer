@@ -59,18 +59,13 @@
     return Math.floor(perKm / 60) + ":" + pad(Math.round(perKm % 60)) + " /km";
   }
 
-  function shortDate(iso) {
-    if (!iso) return "Session report";
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return "Session report";
-    return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" }) +
-      ", " + pad(d.getHours()) + ":" + pad(d.getMinutes());
-  }
-
   /* ---------------- header ---------------- */
 
+  /* The title is rendered server-side in the configured display zone. It is
+     deliberately not rebuilt here: doing it in the browser made the report
+     header show the viewer's zone while the index showed Sydney. */
+
   var sport = meta.sub_sport && meta.sub_sport !== "generic" ? meta.sub_sport : meta.sport;
-  document.getElementById("report-title").textContent = shortDate(meta.start_time);
 
   var subtitleBits = [];
   if (sport) subtitleBits.push(sport.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }));

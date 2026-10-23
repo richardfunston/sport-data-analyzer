@@ -16,6 +16,10 @@ class Config:
     #: reverse proxy such as Caddy's ``handle_path``).
     BASE_PATH = os.environ.get("SDA_BASE_PATH", "").rstrip("/")
 
+    #: Timezone timestamps are rendered in. FIT files record UTC and the store
+    #: keeps UTC; this affects display only, never what is stored.
+    DISPLAY_TZ = os.environ.get("SDA_DISPLAY_TZ", "Australia/Sydney")
+
     #: Reject uploads larger than this. Wahoo files are well under 5 MB.
     MAX_CONTENT_LENGTH = int(os.environ.get("SDA_MAX_UPLOAD_BYTES", 64 * 1024 * 1024))
 

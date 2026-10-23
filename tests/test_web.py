@@ -323,3 +323,33 @@ def test_upload_summary_matches_a_direct_parse(client, canoe_fit):
     assert result["summary"]["max_speed_ms"] == max(
         v for v in direct["series"]["speed"] if v is not None
     )
+
+
+# -- timestamps are rendered in the display timezone ------------------------
+#
+# The stored value is UTC and stays UTC; these check the *rendered pages*, which
+# is where the bug actually was. The canoe fixture starts at 08:00 UTC, which is
+# 18:00 the same day in Sydney (AEST, +10).
+
+
+def test_index_renders_the_session_time_in_the_display_timezone(client, canoe_fit):
+    upload(client, canoe_fit)
+
+    body = client.get("/").get_data(as_text=True)
+    assert "Sat 15 Jun 2024, 18:00 AEST" in body
+    # The unqualified UTC clock is what was shown before. It must not come back.
+    assert "Sat 15 Jun 2024, 08:00" not in body
+
+
+def test_report_header_is_rendered_server_side_in_the_display_timezone(client, canoe_fit):
+    """The header must not depend on the timezone of whoever opens the page."""
+    activity_id = upload(client, canoe_fit).get_json()["results"][0]["id"]
+
+    body = client.get(f"/a/{activity_id}").get_data(as_text=True)
+    assert re.search(r'<h1 id="report-title">Sat 15 Jun 2024, 18:00 AEST</h1>', body)
+
+    # And the browser must not be rebuilding it from the payload: doing that made
+    # the report header disagree with the index for the same session.
+    report_js = client.get("/static/js/report.js").get_data(as_text=True)
+    assert "toLocaleDateString" not in report_js
+    assert "getHours()" not in report_js

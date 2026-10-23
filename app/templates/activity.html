@@ -2,7 +2,7 @@
 {% block title %}{{ record.start_time | short_date }} · {{ record.filename }}{% endblock %}
 
 {% block content %}
-<h1 id="report-title">Session report</h1>
+<h1 id="report-title">{{ record.start_time | daytime }}</h1>
 <p class="subtitle" id="report-subtitle">Loading…</p>
 
 <div class="card">

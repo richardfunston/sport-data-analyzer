@@ -73,6 +73,18 @@ SDA_DATA_DIR=/var/lib/sport-data-analyzer \
 `deploy/sport-data-analyzer.service` is a systemd unit, and
 `deploy/Caddyfile.example` mounts the app under `/sport/` behind Caddy.
 
+### Deploying a change to a running host
+
+`tools/wdeploy.sh` is the deploy step. It runs the suite, **refuses to deploy if
+it fails**, backs up the live application code, syncs, restarts the unit, and
+smoke-checks the socket.
+
+`tools/wsync.sh` is **test-only**: it syncs to a scratch tree and runs pytest
+there. A green run from it says nothing about what the service is serving — the
+running service has its own copy of the code, and a fix that only ever passed
+`wsync.sh` is a fix nobody can see. Use `wdeploy.sh --dry-run` to see what would
+change without touching anything.
+
 `deploy/ci.workflow.yml` is a GitHub Actions workflow. It lives there rather
 than in `.github/workflows/` because pushing a workflow file needs a token with
 the **Workflows** permission; the header of the file has the one-line command to
@@ -120,6 +132,7 @@ dynamic-DNS name rather than a literal address.
 | `SDA_MAX_UPLOAD_BYTES` | `67108864` (64 MB) | Per-request upload ceiling |
 | `SDA_SECRET_KEY` | generated into `$SDA_DATA_DIR/secret_key` | Session-cookie signing key |
 | `SDA_BASE_PATH` | *(empty)* | Prefix, if you are not using `X-Forwarded-Prefix` |
+| `SDA_DISPLAY_TZ` | `Australia/Sydney` | Timezone timestamps are *rendered* in. Storage stays UTC |
 | `SDA_INITIAL_MEMBER_EMAIL` | *(unset)* | First admin, created only when there are no members |
 | `SDA_INITIAL_MEMBER_NAME` | *(unset)* | …their display name |
 | `SDA_INITIAL_MEMBER_PASSWORD` | *(unset)* | …their password. Never commit it |
@@ -325,7 +338,9 @@ tools/
 ├── verify_report_js.js   # browserless frontend check
 ├── profile_report.py     # time and profile the report build
 ├── inspect_fit.py        # dump the structure of a .fit file
-└── w01.sh                # deployment helpers
+├── wsync.sh              # sync to a scratch tree and run the suite there
+├── wdeploy.sh            # deploy to the running service (the real deploy step)
+└── w01.sh                # container helpers used by the two above
 ```
 
 ## Licence
