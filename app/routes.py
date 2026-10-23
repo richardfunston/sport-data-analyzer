@@ -332,6 +332,65 @@ def session_members(activity_id: str):
 # -- the admin screen --------------------------------------------------------
 
 
+def _render_account(store, me, *, error=None, notice=None, status=200):
+    return (
+        render_template(
+            "account.html",
+            me=me,
+            error=error,
+            notice=notice,
+            # Shown on the page so "your sessions stay linked" is visible rather
+            # than merely claimed.
+            session_count=store.count_for(me["id"]),
+        ),
+        status,
+    )
+
+
+@bp.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    """The member's own account: change the address you sign in with.
+
+    Deliberately the only self-service edit. Email is the sign-in identity, and
+    changing it is an UPDATE on the existing row, so the member's id - which every
+    session link is keyed on - never moves. Nothing gets re-linked and no session
+    is evicted, which is what "the links and the system stay" means in practice.
+    """
+    store = _store()
+    me = current_member()
+
+    if request.method == "GET":
+        return _render_account(store, me, notice=request.args.get("notice"))
+
+    email = (request.form.get("email") or "").strip()
+    if not _usable_email(email):
+        return _render_account(
+            store, me, error="That does not look like an email address.", status=400
+        )
+
+    try:
+        updated = store.change_email(me["id"], email)
+    except DuplicateEmail:
+        return _render_account(
+            store,
+            me,
+            error="There is already a member with that email address.",
+            status=400,
+        )
+
+    if updated is None:
+        # The row vanished between the session check and the write. Nothing was
+        # changed, so this is a genuinely unknown member rather than an error.
+        abort(404)
+
+    if updated["email"] == me["email"]:
+        notice = f"{updated['email']} is already your sign-in address."
+    else:
+        notice = f"Your sign-in address is now {updated['email']}."
+    return redirect(url_for("sda.account", notice=notice))
+
+
 def _render_admin(store, *, error=None, notice=None, form=None, status=200):
     return (
         render_template(
@@ -425,6 +484,7 @@ def admin_member_update(user_id: str):
         abort(404)
 
     name = request.form.get("name")
+    email = request.form.get("email")
     wants_admin = request.form.get("is_admin")
     wants_active = request.form.get("is_active")
 
@@ -438,6 +498,15 @@ def admin_member_update(user_id: str):
         if not cleaned:
             abort(400, description="A name is required.")
         fields["name"] = cleaned
+    if email is not None:
+        # The admin's route into a mistyped address: without it, a member who
+        # typos their own email and then gets signed out has no way back in.
+        cleaned = email.strip()
+        if not _usable_email(cleaned):
+            return _render_admin(
+                store, error="That does not look like an email address.", status=400
+            )
+        fields["email"] = cleaned
     if wants_admin is not None:
         fields["is_admin"] = wants_admin == "1"
     if wants_active is not None:
@@ -453,6 +522,12 @@ def admin_member_update(user_id: str):
                     "That would leave no active admin, and there would be no way "
                     "back into this screen."
                 ),
+            )
+        except DuplicateEmail:
+            return _render_admin(
+                store,
+                error="There is already a member with that email address.",
+                status=400,
             )
 
     notice = f"{target['name']} updated."

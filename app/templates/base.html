@@ -21,7 +21,9 @@
         {% if me.is_admin %}
         <a class="link-muted" href="{{ url_for('sda.admin_members') }}">members</a>
         {% endif %}
-        <span class="who" title="{{ me.email }}">{{ me.name }}</span>
+        <span class="who" title="{{ me.email }}">
+          <a class="link-muted" href="{{ url_for('sda.account') }}">{{ me.name }}</a>
+        </span>
         <form method="post" action="{{ url_for('sda.logout') }}" class="inline-form">
           <button type="submit" class="link-muted">sign out</button>
         </form>

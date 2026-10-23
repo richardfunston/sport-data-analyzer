@@ -313,6 +313,30 @@ class Store:
         """One place to trim and case-fold, so no write path can skip it."""
         return email.strip().lower()
 
+    @staticmethod
+    def _member_field_values(
+        *,
+        email: str | None = None,
+        name: str | None = None,
+        is_admin: bool | None = None,
+        is_active: bool | None = None,
+    ) -> dict[str, Any]:
+        """Turn the optional arguments of the member writers into columns.
+
+        Shared by every writer, so a new one cannot forget to normalise an email
+        and leave two accounts differing only in case.
+        """
+        fields: dict[str, Any] = {}
+        if email is not None:
+            fields["email"] = Store._normalise_email(email)
+        if name is not None:
+            fields["name"] = name
+        if is_admin is not None:
+            fields["is_admin"] = 1 if is_admin else 0
+        if is_active is not None:
+            fields["is_active"] = 1 if is_active else 0
+        return fields
+
     def _new_user_id(self) -> str:
         with self._connect() as conn:
             for _ in range(50):
@@ -399,37 +423,56 @@ class Store:
         self,
         user_id: str,
         *,
+        email: str | None = None,
         name: str | None = None,
         is_admin: bool | None = None,
         is_active: bool | None = None,
     ) -> dict[str, Any] | None:
-        """Rename, promote or (de)activate. ``None`` for an unknown id."""
+        """Rename, re-address, promote or (de)activate.
+
+        ``None`` for an unknown id. Raises :class:`DuplicateEmail` when the
+        address is already in use.
+        """
         if self.get_member(user_id) is None:
             return None
 
-        fields: dict[str, Any] = {}
-        if name is not None:
-            fields["name"] = name
-        if is_admin is not None:
-            fields["is_admin"] = 1 if is_admin else 0
-        if is_active is not None:
-            fields["is_active"] = 1 if is_active else 0
-
+        fields = self._member_field_values(
+            email=email, name=name, is_admin=is_admin, is_active=is_active
+        )
         if fields:
             fields["modified_at"] = datetime.now(timezone.utc).isoformat()
             assignments = ", ".join(f"{column} = :{column}" for column in fields)
-            with self._connect() as conn:
-                conn.execute(
-                    f"UPDATE users SET {assignments} WHERE id = :id",
-                    {**fields, "id": user_id},
-                )
-                conn.commit()
+            try:
+                with self._connect() as conn:
+                    conn.execute(
+                        f"UPDATE users SET {assignments} WHERE id = :id",
+                        {**fields, "id": user_id},
+                    )
+                    conn.commit()
+            except sqlite3.IntegrityError as exc:
+                # email is the only UNIQUE column other than the key, so a
+                # collision here is a duplicate address, not a broken write.
+                raise DuplicateEmail(str(fields.get("email", ""))) from exc
         return self.get_member(user_id)
+
+    def change_email(self, user_id: str, email: str) -> dict[str, Any] | None:
+        """Re-address a member, leaving the account and everything on it intact.
+
+        The row is updated in place, so ``id`` never moves: every
+        ``activity_members`` link, the password, the admin flag and the live
+        session survive by construction rather than by re-linking afterwards.
+
+        ``session_epoch`` is deliberately **not** bumped. That is what a password
+        change does to evict sessions, and editing your own address should not
+        sign you out of your own device.
+        """
+        return self.update_member(user_id, email=email)
 
     def update_member_safely(
         self,
         user_id: str,
         *,
+        email: str | None = None,
         name: str | None = None,
         is_admin: bool | None = None,
         is_active: bool | None = None,
@@ -446,13 +489,9 @@ class Store:
         is safe, and both apply it - reaching zero active admins, which locks
         everyone out of the admin screen with no way back in through the UI.
         """
-        fields: dict[str, Any] = {}
-        if name is not None:
-            fields["name"] = name
-        if is_admin is not None:
-            fields["is_admin"] = 1 if is_admin else 0
-        if is_active is not None:
-            fields["is_active"] = 1 if is_active else 0
+        fields = self._member_field_values(
+            email=email, name=name, is_admin=is_admin, is_active=is_active
+        )
 
         conn = self._connect()
         conn.isolation_level = None  # take transaction control ourselves
@@ -482,10 +521,15 @@ class Store:
             if fields:
                 fields["modified_at"] = datetime.now(timezone.utc).isoformat()
                 assignments = ", ".join(f"{column} = :{column}" for column in fields)
-                conn.execute(
-                    f"UPDATE users SET {assignments} WHERE id = :id",
-                    {**fields, "id": user_id},
-                )
+                try:
+                    conn.execute(
+                        f"UPDATE users SET {assignments} WHERE id = :id",
+                        {**fields, "id": user_id},
+                    )
+                except sqlite3.IntegrityError as exc:
+                    # Raised inside the transaction; the finally below rolls it
+                    # back, so a refused address leaves the row untouched.
+                    raise DuplicateEmail(str(fields.get("email", ""))) from exc
 
             updated = conn.execute(
                 "SELECT * FROM users WHERE id = ?", (user_id,)

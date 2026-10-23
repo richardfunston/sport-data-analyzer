@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Account · Sport Data Analyzer{% endblock %}
+
+{% block content %}
+<h1>Account</h1>
+<p class="subtitle">
+  The address you sign in with. Changing it keeps everything else: your sessions
+  stay linked to you, and you stay signed in.
+</p>
+
+{% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+
+<div class="card">
+  <h2>{{ me.name }}{% if me.is_admin %} <span class="tag">admin</span>{% endif %}</h2>
+  <p class="subtitle" style="margin:0 0 10px">
+    Signing in as <strong>{{ me.email }}</strong> — you can sign in with a new
+    address below, and nothing else about your account moves.
+  </p>
+  <p class="subtitle" style="margin:0">
+    {% if session_count %}
+      {{ session_count }} session{{ '' if session_count == 1 else 's' }} linked to you.
+    {% else %}
+      No sessions linked to you yet.
+    {% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <h2>Change your email</h2>
+  <form method="post" action="{{ url_for('sda.account') }}" class="admin-form">
+    <label for="email">New email address</label>
+    <input id="email" name="email" type="email" value="{{ me.email }}"
+           autocomplete="email" autocapitalize="none" spellcheck="false" required>
+
+    <button type="submit">Change email</button>
+  </form>
+
+  <p class="subtitle" style="margin:14px 0 0">
+    Your password stays the same and you stay signed in here. From now on you sign
+    in with the new address. Your sessions and any sharing stay exactly as they are.
+  </p>
+</div>
+{% endblock %}

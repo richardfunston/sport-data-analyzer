@@ -408,3 +408,79 @@ def test_the_rename_migration_runs_once_and_is_harmless_afterwards(tmp_path):
     store = Store(data)
 
     assert store.count_for("u1") == 1
+
+
+# -- changing an email keeps the account and everything hanging off it -------
+#
+# The links table is keyed on user_id, so an email change is an UPDATE on the
+# existing row and the id never moves. These pin that down, because the failure
+# mode would be silent: a re-created row would leave every link pointing at a
+# member that no longer exists, and the sessions would simply vanish from view.
+
+
+def test_change_email_updates_in_place_and_keeps_the_id(store):
+    me = store.create_member("old@funston.com", "A", "pw")
+    updated = store.change_email(me["id"], "new@funston.com")
+
+    assert updated["id"] == me["id"]
+    assert updated["email"] == "new@funston.com"
+
+
+def test_change_email_keeps_every_session_link(store, saved_activity):
+    me = store.create_member("old@funston.com", "A", "pw")
+    store.link_member(saved_activity, me["id"])
+    assert store.count_for(me["id"]) == 1
+
+    store.change_email(me["id"], "new@funston.com")
+
+    assert store.count_for(me["id"]) == 1
+    assert store.get_for(saved_activity, me["id"]) is not None
+    assert [m["email"] for m in store.members_for(saved_activity)] == ["new@funston.com"]
+
+
+def test_change_email_does_not_touch_the_session_epoch(store):
+    """The epoch is what a password change bumps to evict sessions.
+
+    An email change must not bump it: the member is told the system stays, and
+    being signed out of your own device for editing your address is not that.
+    """
+    me = store.create_member("old@funston.com", "A", "pw")
+    before = store.session_epoch_for(me["id"])
+
+    store.change_email(me["id"], "new@funston.com")
+
+    assert store.session_epoch_for(me["id"]) == before
+
+
+def test_change_email_keeps_the_password_admin_flag_and_activity(store):
+    me = store.create_member("old@funston.com", "A", "pw", is_admin=True)
+
+    updated = store.change_email(me["id"], "new@funston.com")
+
+    assert updated["password_hash"] == me["password_hash"]
+    assert updated["is_admin"] == 1
+    assert updated["is_active"] == 1
+    assert store.verify_member("new@funston.com", "pw")["id"] == me["id"]
+    assert store.verify_member("old@funston.com", "pw") is None
+
+
+def test_change_email_normalises_what_it_is_given(store):
+    me = store.create_member("old@funston.com", "A", "pw")
+    assert store.change_email(me["id"], "  New@Funston.COM  ")["email"] == "new@funston.com"
+
+
+@pytest.mark.parametrize("taken", ["taken@funston.com", "TAKEN@funston.com", " Taken@Funston.com "])
+def test_change_email_refuses_an_address_already_in_use(store, taken):
+    """Case-insensitively, because the column is UNIQUE COLLATE NOCASE."""
+    store.create_member("taken@funston.com", "T", "pw")
+    me = store.create_member("mine@funston.com", "M", "pw")
+
+    with pytest.raises(DuplicateEmail):
+        store.change_email(me["id"], taken)
+
+    # And the refusal left the member exactly as they were.
+    assert store.get_member(me["id"])["email"] == "mine@funston.com"
+
+
+def test_change_email_for_an_unknown_member_returns_none(store):
+    assert store.change_email("nope", "x@funston.com") is None

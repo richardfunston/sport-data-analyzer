@@ -159,6 +159,18 @@ After that an admin manages everyone at `/admin/members`: create members,
 change passwords, promote or deactivate. Each report page carries a members card
 for sharing that session with someone else.
 
+A member changes their own sign-in address at `/account` (the link is their name
+in the header). Because the email is the login, that is the one self-service edit
+there is. It is an `UPDATE` on the existing row, so the member's `id` never moves
+and **every session link, the password, the admin flag and the live session
+survive** — nothing is re-linked and nobody is signed out. The session epoch is
+deliberately not bumped; that is what a password change does.
+
+An admin can also change anyone's address from the members screen, which is the
+way back in if someone mistypes theirs and then gets signed out. There is no mail
+sending anywhere in this app, so **an email change takes effect immediately with
+no confirmation step** — the old address stops signing in at once.
+
 Seven things worth knowing:
 
 - **A password change signs that member out everywhere.** The cookie carries a

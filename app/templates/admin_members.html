@@ -58,7 +58,16 @@
             {{ p.name }}
             {% if p.id == me.id %}<span class="tag">you</span>{% endif %}
           </td>
-          <td>{{ p.email }}</td>
+          <td>
+            <div>{{ p.email }}</div>
+            <form method="post" class="inline-form"
+                  action="{{ url_for('sda.admin_member_update', user_id=p.id) }}">
+              <input name="email" type="email" value="" placeholder="new email"
+                     autocomplete="off" autocapitalize="none" spellcheck="false"
+                     aria-label="New email for {{ p.name }}" required>
+              <button type="submit" class="btn ghost small">Change</button>
+            </form>
+          </td>
           <td>
             {{ 'admin' if p.is_admin else 'member' }}
             {%- if not p.is_active %} · <span class="muted">inactive</span>{% endif %}
