@@ -21,7 +21,7 @@ def client(app, store):
     it -- that is tests/test_visibility.py. Signing in here keeps these tests
     testing what they were written to test.
     """
-    return sign_in(app.test_client(), store.create_paddler("tester@funston.com", "Tester", "pw"))
+    return sign_in(app.test_client(), store.create_member("tester@funston.com", "Tester", "pw"))
 
 
 def upload(client, payload: bytes, filename: str = "canoe-session.fit"):
@@ -68,7 +68,7 @@ def test_uploaded_activity_appears_in_the_index(client, store, canoe_fit):
     assert b"canoe-session.fit" not in response.data  # only the date is listed
     assert b"Canoeing" in response.data
 
-    assert store.count_for(client.paddler["id"]) == 1
+    assert store.count_for(client.member["id"]) == 1
 
 
 def test_report_page_embeds_the_payload(client, canoe_fit):
@@ -141,7 +141,7 @@ def test_reuploading_the_same_file_is_deduplicated(client, store, canoe_fit):
 
     assert second["id"] == first["id"]
     assert second["created"] is False
-    assert store.count_for(client.paddler["id"]) == 1
+    assert store.count_for(client.member["id"]) == 1
 
 
 def test_uploading_multiple_files_in_one_request(client, store, canoe_fit):
@@ -160,7 +160,7 @@ def test_uploading_multiple_files_in_one_request(client, store, canoe_fit):
     assert all(r["ok"] for r in results)
     # Same bytes twice -> one stored activity.
     assert results[0]["id"] == results[1]["id"]
-    assert store.count_for(client.paddler["id"]) == 1
+    assert store.count_for(client.member["id"]) == 1
 
 
 def test_non_fit_upload_is_rejected(client):
@@ -200,7 +200,7 @@ def test_delete_removes_the_activity(client, store, canoe_fit):
 
     assert client.post(f"/api/a/{activity_id}/delete").status_code == 200
     assert client.get(f"/a/{activity_id}").status_code == 404
-    assert store.count_for(client.paddler["id"]) == 0
+    assert store.count_for(client.member["id"]) == 0
 
 
 def test_stale_report_is_rebuilt_from_the_original_file(app, client, canoe_fit):

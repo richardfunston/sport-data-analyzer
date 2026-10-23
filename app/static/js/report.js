@@ -614,13 +614,13 @@
     });
   }
 
-  // -- sharing the session with other paddlers -------------------------------
-  var paddlerList = document.getElementById("paddler-list");
-  if (paddlerList) {
-    var paddlerUrl = paddlerList.dataset.paddlerUrl;
+  // -- sharing the session with other members -------------------------------
+  var memberList = document.getElementById("member-list");
+  if (memberList) {
+    var memberUrl = memberList.dataset.memberUrl;
 
-    function sharePaddler(body) {
-      return fetch(paddlerUrl, {
+    function shareMember(body) {
+      return fetch(memberUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -633,27 +633,27 @@
           .json()
           .catch(function () { return {}; })
           .then(function (data) {
-            throw new Error(data.error || "Could not update the paddlers.");
+            throw new Error(data.error || "Could not update the members.");
           });
       });
     }
 
-    var addButton = document.getElementById("add-paddler-btn");
-    var addSelect = document.getElementById("paddler-to-add");
+    var addButton = document.getElementById("add-member-btn");
+    var addSelect = document.getElementById("member-to-add");
     if (addButton && addSelect) {
       addButton.addEventListener("click", function () {
         if (!addSelect.value) return;
-        sharePaddler({ add: addSelect.value }).catch(function (error) {
+        shareMember({ add: addSelect.value }).catch(function (error) {
           window.alert(error.message);
         });
       });
     }
 
-    paddlerList.addEventListener("click", function (event) {
+    memberList.addEventListener("click", function (event) {
       var button = event.target.closest("[data-remove]");
       if (!button) return;
-      if (!window.confirm("Remove this paddler from the session?")) return;
-      sharePaddler({ remove: button.dataset.remove }).catch(function (error) {
+      if (!window.confirm("Remove this member from the session?")) return;
+      shareMember({ remove: button.dataset.remove }).catch(function (error) {
         window.alert(error.message);
       });
     });

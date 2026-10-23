@@ -25,7 +25,7 @@ __all__ = ["DuplicateEmail", "LastAdminError", "Store"]
 
 
 class DuplicateEmail(Exception):
-    """Raised when a paddler is created with an email that already exists."""
+    """Raised when a member is created with an email that already exists."""
 
 
 class LastAdminError(Exception):
@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS activities_start_time ON activities (start_time DESC);
 
--- A paddler is an account. A session is a shared record, so a canoe with two
--- paddlers is one activity linked twice: hence the join table rather than an
+-- A member is an account. A session is a shared record, so a canoe with two
+-- members is one activity linked twice: hence the join table rather than an
 -- owner column.
 --
 -- email is COLLATE NOCASE because SQLite's default collation for TEXT is
@@ -82,12 +82,12 @@ CREATE TABLE IF NOT EXISTS users (
     modified_at   TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS activity_paddlers (
+CREATE TABLE IF NOT EXISTS activity_members (
     activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
     user_id     TEXT NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
     PRIMARY KEY (activity_id, user_id)
 );
-CREATE INDEX IF NOT EXISTS activity_paddlers_user ON activity_paddlers (user_id);
+CREATE INDEX IF NOT EXISTS activity_members_user ON activity_members (user_id);
 
 -- Failed sign-ins, so the login route can throttle. Deliberately in SQLite
 -- rather than in process memory: gunicorn runs two workers with no --preload,
@@ -111,10 +111,38 @@ class Store:
         self.uploads = self.data_dir / "uploads"
         self.uploads.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "sport.db"
+        self._rename_legacy_tables()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
 
     # -- internals ---------------------------------------------------------
+
+    def _rename_legacy_tables(self) -> None:
+        """Bring a database written before the member rename up to date.
+
+        The join table was called ``activity_paddlers``; it is now
+        ``activity_members``. This runs **before** the schema script on purpose:
+        the schema uses ``CREATE TABLE IF NOT EXISTS``, so running it first would
+        create an empty new table beside the old one, and the sessions would then
+        look lost - still in the database, invisible to every account.
+
+        A no-op on a fresh database and on every run after the first.
+        """
+        with self._connect() as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "activity_paddlers" in tables and "activity_members" not in tables:
+                conn.execute(
+                    "ALTER TABLE activity_paddlers RENAME TO activity_members"
+                )
+                # The index follows its table and keeps the old name, so drop it
+                # and let the schema recreate it under the new one.
+                conn.execute("DROP INDEX IF EXISTS activity_paddlers_user")
+                conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=15)
@@ -182,7 +210,7 @@ class Store:
         the existing record with ``created=False``.
 
         ``user_id`` links the uploader. It is applied on **both** paths: a
-        second paddler re-uploading a file that already exists must still end up
+        second member re-uploading a file that already exists must still end up
         linked to it, or the session never appears for them - which is exactly
         the case this feature exists for.
         """
@@ -194,7 +222,7 @@ class Store:
             ).fetchone()
         if existing is not None:
             if user_id is not None:
-                self.link_paddler(existing["id"], user_id)
+                self.link_member(existing["id"], user_id)
             return dict(existing), False
 
         activity_id = self._new_id()
@@ -219,7 +247,7 @@ class Store:
             conn.commit()
 
         if user_id is not None:
-            self.link_paddler(activity_id, user_id)
+            self.link_member(activity_id, user_id)
 
         return dict(row), True
 
@@ -278,7 +306,7 @@ class Store:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM activities").fetchone()[0])
 
-    # -- paddlers ----------------------------------------------------------
+    # -- members ----------------------------------------------------------
 
     @staticmethod
     def _normalise_email(email: str) -> str:
@@ -296,9 +324,9 @@ class Store:
                     is None
                 ):
                     return candidate
-        raise RuntimeError("could not allocate a unique paddler id")
+        raise RuntimeError("could not allocate a unique member id")
 
-    def create_paddler(
+    def create_member(
         self,
         email: str,
         name: str,
@@ -307,7 +335,7 @@ class Store:
         is_admin: bool = False,
         is_active: bool = True,
     ) -> dict[str, Any]:
-        """Create a paddler. Raises :class:`DuplicateEmail` on a repeat email."""
+        """Create a member. Raises :class:`DuplicateEmail` on a repeat email."""
         now = datetime.now(timezone.utc).isoformat()
         row = {
             "id": self._new_user_id(),
@@ -332,14 +360,14 @@ class Store:
             raise DuplicateEmail(row["email"]) from exc
         return dict(row)
 
-    def get_paddler(self, user_id: str) -> dict[str, Any] | None:
+    def get_member(self, user_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE id = ?", (user_id,)
             ).fetchone()
         return dict(row) if row else None
 
-    def get_paddler_by_email(self, email: str) -> dict[str, Any] | None:
+    def get_member_by_email(self, email: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE email = ?",
@@ -347,27 +375,27 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def verify_paddler(self, email: str, password: str) -> dict[str, Any] | None:
-        """The paddler whose email and password match, if any.
+    def verify_member(self, email: str, password: str) -> dict[str, Any] | None:
+        """The member whose email and password match, if any.
 
-        A deactivated paddler never verifies, so a disabled account cannot sign
+        A deactivated member never verifies, so a disabled account cannot sign
         back in with a password it already knew.
         """
-        user = self.get_paddler_by_email(email)
+        user = self.get_member_by_email(email)
         if user is None or not user["is_active"]:
             return None
         if not check_password(password, user["password_hash"]):
             return None
         return user
 
-    def list_paddlers(self) -> list[dict[str, Any]]:
+    def list_members(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM users ORDER BY is_active DESC, name, email"
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def update_paddler(
+    def update_member(
         self,
         user_id: str,
         *,
@@ -376,7 +404,7 @@ class Store:
         is_active: bool | None = None,
     ) -> dict[str, Any] | None:
         """Rename, promote or (de)activate. ``None`` for an unknown id."""
-        if self.get_paddler(user_id) is None:
+        if self.get_member(user_id) is None:
             return None
 
         fields: dict[str, Any] = {}
@@ -396,9 +424,9 @@ class Store:
                     {**fields, "id": user_id},
                 )
                 conn.commit()
-        return self.get_paddler(user_id)
+        return self.get_member(user_id)
 
-    def update_paddler_safely(
+    def update_member_safely(
         self,
         user_id: str,
         *,
@@ -406,7 +434,7 @@ class Store:
         is_admin: bool | None = None,
         is_active: bool | None = None,
     ) -> dict[str, Any] | None:
-        """Update a paddler, refusing any change that would leave no active admin.
+        """Update a member, refusing any change that would leave no active admin.
 
         Returns the updated row, or ``None`` for an unknown id. Raises
         :class:`LastAdminError` when the change is refused.
@@ -479,7 +507,7 @@ class Store:
         The bump is what makes a password change evict everyone already signed
         in: every cookie issued before the change carries an older epoch.
         """
-        if self.get_paddler(user_id) is None:
+        if self.get_member(user_id) is None:
             return False
         with self._connect() as conn:
             conn.execute(
@@ -517,23 +545,23 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def backfill_paddlers(self, user_id: str) -> int:
-        """Link every activity with no *active* paddler to ``user_id``.
+    def backfill_members(self, user_id: str) -> int:
+        """Link every activity with no *active* member to ``user_id``.
 
         Idempotent: a second run inserts nothing. Returns the number adopted.
 
-        "No active paddler" rather than "no paddler at all", because
-        deactivating the only paddler on a session reaches the same dead end by
+        "No active member" rather than "no member at all", because
+        deactivating the only member on a session reaches the same dead end by
         another route. The link row survives the deactivation, so a narrower
         test would never adopt it and the session would be invisible to every
         account - indistinguishable from having lost it.
         """
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT OR IGNORE INTO activity_paddlers (activity_id, user_id)"
+                "INSERT OR IGNORE INTO activity_members (activity_id, user_id)"
                 " SELECT id, ? FROM activities"
                 " WHERE id NOT IN ("
-                "   SELECT ap.activity_id FROM activity_paddlers ap"
+                "   SELECT ap.activity_id FROM activity_members ap"
                 "   JOIN users u ON u.id = ap.user_id"
                 "   WHERE u.is_active = 1"
                 ")",
@@ -544,31 +572,31 @@ class Store:
 
     # -- sharing -----------------------------------------------------------
 
-    def link_paddler(self, activity_id: str, user_id: str) -> bool:
-        """Link a paddler to a session. False when already linked."""
+    def link_member(self, activity_id: str, user_id: str) -> bool:
+        """Link a member to a session. False when already linked."""
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT OR IGNORE INTO activity_paddlers (activity_id, user_id)"
+                "INSERT OR IGNORE INTO activity_members (activity_id, user_id)"
                 " VALUES (?, ?)",
                 (activity_id, user_id),
             )
             conn.commit()
         return cursor.rowcount > 0
 
-    def unlink_paddler(self, activity_id: str, user_id: str) -> bool:
+    def unlink_member(self, activity_id: str, user_id: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM activity_paddlers WHERE activity_id = ? AND user_id = ?",
+                "DELETE FROM activity_members WHERE activity_id = ? AND user_id = ?",
                 (activity_id, user_id),
             )
             conn.commit()
         return cursor.rowcount > 0
 
-    def paddlers_for(self, activity_id: str) -> list[dict[str, Any]]:
+    def members_for(self, activity_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT u.* FROM users u"
-                " JOIN activity_paddlers ap ON ap.user_id = u.id"
+                " JOIN activity_members ap ON ap.user_id = u.id"
                 " WHERE ap.activity_id = ? ORDER BY u.name, u.id",
                 (activity_id,),
             ).fetchall()
@@ -613,11 +641,11 @@ class Store:
             )
             conn.commit()
 
-    # -- reads scoped to one paddler ---------------------------------------
+    # -- reads scoped to one member ---------------------------------------
 
     _SCOPED_SELECT = (
         "SELECT a.* FROM activities a"
-        " JOIN activity_paddlers ap ON ap.activity_id = a.id"
+        " JOIN activity_members ap ON ap.activity_id = a.id"
     )
 
     def list_for(self, user_id: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -631,9 +659,9 @@ class Store:
         return [dict(r) for r in rows]
 
     def get_for(self, activity_id: str, user_id: str) -> dict[str, Any] | None:
-        """The activity, but only if this paddler is linked to it.
+        """The activity, but only if this member is linked to it.
 
-        ``None`` for an unlinked paddler is deliberate: the routes turn it into
+        ``None`` for an unlinked member is deliberate: the routes turn it into
         a 404, so an outsider cannot confirm the id exists.
         """
         with self._connect() as conn:
@@ -644,7 +672,7 @@ class Store:
         return dict(row) if row else None
 
     def count_for(self, user_id: str) -> int:
-        """How many activities this paddler can actually see.
+        """How many activities this member can actually see.
 
         Joined through ``activities`` rather than counting link rows, so it
         agrees with :meth:`list_for` even if a link outlives its activity. A
@@ -656,7 +684,7 @@ class Store:
             return int(
                 conn.execute(
                     "SELECT COUNT(*) FROM activities a"
-                    " JOIN activity_paddlers ap ON ap.activity_id = a.id"
+                    " JOIN activity_members ap ON ap.activity_id = a.id"
                     " WHERE ap.user_id = ?",
                     (user_id,),
                 ).fetchone()[0]

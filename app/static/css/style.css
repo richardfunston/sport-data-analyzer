@@ -442,7 +442,7 @@ tbody tr:hover { background: var(--panel-2); }
   cursor: pointer;
 }
 
-.paddler-list {
+.member-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -451,7 +451,7 @@ tbody tr:hover { background: var(--panel-2); }
   gap: 8px;
 }
 
-.paddler {
+.member {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -462,15 +462,15 @@ tbody tr:hover { background: var(--panel-2); }
   border-radius: 8px;
 }
 
-.paddler-name { font-weight: 600; }
+.member-name { font-weight: 600; }
 
-.paddler-email {
+.member-email {
   color: var(--muted);
   font-size: 13px;
   margin-right: auto;
 }
 
-.paddler .tag {
+.member .tag {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -480,9 +480,9 @@ tbody tr:hover { background: var(--panel-2); }
   color: var(--accent);
 }
 
-.paddler-add { margin-top: 12px; }
+.member-add { margin-top: 12px; }
 
-.paddler-add select {
+.member-add select {
   padding: 8px 10px;
   background: var(--panel-2);
   border: 1px solid var(--line);

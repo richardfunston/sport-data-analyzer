@@ -4,7 +4,7 @@ Kept separate from :mod:`app.storage` so the store can hash a password without
 owning the auth concern. Nothing here imports the store at module level - it
 reaches the store through the app, which keeps the import graph one-way.
 
-The session cookie carries the paddler's id and a ``session_epoch``. Every
+The session cookie carries the member's id and a ``session_epoch``. Every
 request re-reads the row, so a deactivated account, a deleted account, or a
 password changed since the cookie was issued all read as signed out.
 """
@@ -26,9 +26,9 @@ __all__ = [
     "hash_password",
     "check_password",
     "load_secret_key",
-    "current_paddler",
-    "login_paddler",
-    "logout_paddler",
+    "current_member",
+    "login_member",
+    "logout_member",
     "login_required",
     "admin_required",
     "usable_email",
@@ -75,7 +75,7 @@ SESSION_HOURS = 12
 #:
 #: Keyed on (email, address) rather than either alone: keying on address alone
 #: lets a shared NAT lock out everyone behind it, and keying on email alone
-#: lets a stranger lock a known paddler out of their own account.
+#: lets a stranger lock a known member out of their own account.
 LOGIN_MAX_FAILURES = 5
 LOGIN_WINDOW_SECONDS = 15 * 60
 
@@ -141,8 +141,8 @@ def load_secret_key(data_dir: Path | str) -> str:
 # -- the session -------------------------------------------------------------
 
 
-def current_paddler() -> dict[str, Any] | None:
-    """The signed-in paddler, or ``None``.
+def current_member() -> dict[str, Any] | None:
+    """The signed-in member, or ``None``.
 
     Re-reads the row every request rather than trusting the cookie, so anything
     that happened to the account since the cookie was issued takes effect on the
@@ -157,7 +157,7 @@ def current_paddler() -> dict[str, Any] | None:
     if not user_id or epoch is None:
         return None
 
-    user = store.get_paddler(user_id)
+    user = store.get_member(user_id)
     if user is None or not user["is_active"]:
         return None
     if int(user["session_epoch"]) != int(epoch):
@@ -165,15 +165,15 @@ def current_paddler() -> dict[str, Any] | None:
     return user
 
 
-def login_paddler(user: dict[str, Any]) -> None:
-    """Sign a paddler in for :data:`SESSION_HOURS`."""
+def login_member(user: dict[str, Any]) -> None:
+    """Sign a member in for :data:`SESSION_HOURS`."""
     session.clear()
     session["user_id"] = user["id"]
     session["epoch"] = int(user["session_epoch"])
     session.permanent = True
 
 
-def logout_paddler() -> None:
+def logout_member() -> None:
     session.clear()
 
 
@@ -187,7 +187,7 @@ def _sign_in_target() -> str:
 def login_required(view: Callable) -> Callable:
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        if current_paddler() is None:
+        if current_member() is None:
             return redirect(_sign_in_target())
         return view(*args, **kwargs)
 
@@ -197,14 +197,14 @@ def login_required(view: Callable) -> Callable:
 def admin_required(view: Callable) -> Callable:
     """Admin only.
 
-    Resolves the signed-in paddler *first*: an anonymous request gets the same
+    Resolves the signed-in member *first*: an anonymous request gets the same
     redirect as :func:`login_required` rather than a 403. Answering 403 would
     tell a stranger the route exists.
     """
 
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        user = current_paddler()
+        user = current_member()
         if user is None:
             return redirect(_sign_in_target())
         if not user["is_admin"]:

@@ -16,11 +16,11 @@ import pytest
 from app.auth import (
     LOGIN_MAX_FAILURES,
     check_password,
-    current_paddler,
+    current_member,
     hash_password,
     load_secret_key,
-    login_paddler,
-    logout_paddler,
+    login_member,
+    logout_member,
 )
 from app.storage import Store
 
@@ -40,7 +40,7 @@ def test_password_roundtrip():
 
 
 def test_same_password_hashes_differently():
-    """A per-password salt, so two paddlers with one password are not equal."""
+    """A per-password salt, so two members with one password are not equal."""
     assert hash_password("pw") != hash_password("pw")
 
 
@@ -87,55 +87,55 @@ def test_secret_key_honours_the_environment(tmp_path, monkeypatch):
 # -- the session -------------------------------------------------------------
 
 
-def test_current_paddler_is_none_when_anonymous(app):
+def test_current_member_is_none_when_anonymous(app):
     with app.test_request_context("/"):
-        assert current_paddler() is None
+        assert current_member() is None
 
 
-def test_login_then_current_paddler(app, store):
-    user = store.create_paddler("a@funston.com", "A", "pw")
+def test_login_then_current_member(app, store):
+    user = store.create_member("a@funston.com", "A", "pw")
     with app.test_request_context("/"):
-        login_paddler(user)
-        assert current_paddler()["id"] == user["id"]
+        login_member(user)
+        assert current_member()["id"] == user["id"]
 
 
-def test_logout_signs_the_paddler_out(app, store):
-    user = store.create_paddler("a@funston.com", "A", "pw")
+def test_logout_signs_the_member_out(app, store):
+    user = store.create_member("a@funston.com", "A", "pw")
     with app.test_request_context("/"):
-        login_paddler(user)
-        logout_paddler()
-        assert current_paddler() is None
+        login_member(user)
+        logout_member()
+        assert current_member() is None
 
 
-def test_current_paddler_ignores_a_stale_epoch(app, store):
+def test_current_member_ignores_a_stale_epoch(app, store):
     """A password change evicts sessions issued before it."""
-    user = store.create_paddler("a@funston.com", "A", "pw")
+    user = store.create_member("a@funston.com", "A", "pw")
     with app.test_request_context("/"):
-        login_paddler(user)
+        login_member(user)
         store.set_password(user["id"], "new")
-        assert current_paddler() is None
+        assert current_member() is None
 
 
-def test_current_paddler_ignores_a_deactivated_paddler(app, store):
-    user = store.create_paddler("a@funston.com", "A", "pw")
+def test_current_member_ignores_a_deactivated_member(app, store):
+    user = store.create_member("a@funston.com", "A", "pw")
     with app.test_request_context("/"):
-        login_paddler(user)
-        store.update_paddler(user["id"], is_active=False)
-        assert current_paddler() is None
+        login_member(user)
+        store.update_member(user["id"], is_active=False)
+        assert current_member() is None
 
 
-def test_current_paddler_ignores_a_deleted_paddler(app, store):
-    user = store.create_paddler("a@funston.com", "A", "pw")
+def test_current_member_ignores_a_deleted_member(app, store):
+    user = store.create_member("a@funston.com", "A", "pw")
     with app.test_request_context("/"):
-        login_paddler(user)
+        login_member(user)
         with store._connect() as conn:
             conn.execute("DELETE FROM users WHERE id = ?", (user["id"],))
             conn.commit()
-        assert current_paddler() is None
+        assert current_member() is None
 
 
 def test_session_survives_a_round_trip_through_the_cookie(client, store):
-    user = store.create_paddler("a@funston.com", "A", "pw")
+    user = store.create_member("a@funston.com", "A", "pw")
     with client.session_transaction() as sess:
         sess["user_id"] = user["id"]
         sess["epoch"] = user["session_epoch"]
@@ -172,7 +172,7 @@ def test_the_cookie_is_secure_over_https_and_plain_over_http(client, store):
     `Secure` off means a 12-hour session cookie travels in the clear on the
     public host. It follows the scheme the request actually arrived over.
     """
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     credentials = {"email": "rpf@funston.com", "password": "pw"}
 
     over_https = client.post("/login", data=credentials, base_url="https://paddle.funston.com")
@@ -197,7 +197,7 @@ def test_login_page_renders(client):
 
 
 def test_login_with_correct_credentials_redirects_to_the_index(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "8983498131")
     response = client.post(
         "/login", data={"email": "rpf@funston.com", "password": "8983498131"}
     )
@@ -206,7 +206,7 @@ def test_login_with_correct_credentials_redirects_to_the_index(client, store):
 
 
 def test_login_accepts_the_email_however_it_is_typed(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     response = client.post(
         "/login", data={"email": "  RPF@Funston.COM  ", "password": "pw"}
     )
@@ -214,7 +214,7 @@ def test_login_accepts_the_email_however_it_is_typed(client, store):
 
 
 def test_login_honours_a_safe_next_parameter(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     response = client.post(
         "/login",
         data={"email": "rpf@funston.com", "password": "pw", "next": "/a/abc123"},
@@ -235,7 +235,7 @@ def test_login_honours_a_safe_next_parameter(client, store):
 )
 def test_login_refuses_to_redirect_off_site(client, store, hostile):
     """`next` is attacker-controlled: a bare 'starts with /' check lets //through."""
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     response = client.post(
         "/login",
         data={"email": "rpf@funston.com", "password": "pw", "next": hostile},
@@ -245,7 +245,7 @@ def test_login_refuses_to_redirect_off_site(client, store, hostile):
 
 
 def test_login_with_wrong_password_shows_one_generic_error(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     response = client.post("/login", data={"email": "rpf@funston.com", "password": "nope"})
     assert response.status_code == 200
     assert b"incorrect" in response.data.lower()
@@ -263,7 +263,7 @@ def _without_echoed_input(response, submitted: str) -> bytes:
 
 def test_login_does_not_reveal_whether_an_account_exists(client, store):
     """No-such-user and wrong-password must be indistinguishable to the caller."""
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
 
     unknown = client.post("/login", data={"email": "nobody@funston.com", "password": "pw"})
     wrong = client.post("/login", data={"email": "rpf@funston.com", "password": "nope"})
@@ -275,16 +275,16 @@ def test_login_does_not_reveal_whether_an_account_exists(client, store):
     ) == _without_echoed_input(wrong, "rpf@funston.com")
 
 
-def test_login_rejects_a_deactivated_paddler(client, store):
-    user = store.create_paddler("rpf@funston.com", "Richard", "pw")
-    store.update_paddler(user["id"], is_active=False)
+def test_login_rejects_a_deactivated_member(client, store):
+    user = store.create_member("rpf@funston.com", "Richard", "pw")
+    store.update_member(user["id"], is_active=False)
     response = client.post("/login", data={"email": "rpf@funston.com", "password": "pw"})
     assert response.status_code == 200
     assert b"incorrect" in response.data.lower()
 
 
 def test_sign_out_clears_the_session(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     client.post("/login", data={"email": "rpf@funston.com", "password": "pw"})
     with client.session_transaction() as sess:
         assert sess.get("user_id")
@@ -311,7 +311,7 @@ def _try(client, password, email="rpf@funston.com", ip=None):
 def test_repeated_failures_are_throttled(client, store):
     """The admin password is ten numeric digits, so an unthrottled public login
     is 10^10 guesses away from the account."""
-    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "8983498131")
 
     for _ in range(LOGIN_MAX_FAILURES):
         assert _try(client, "wrong").status_code == 200
@@ -322,8 +322,8 @@ def test_repeated_failures_are_throttled(client, store):
 
 
 def test_throttling_does_not_lock_out_a_different_address(client, store):
-    """A stranger must not be able to lock the real paddler out of their account."""
-    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+    """A stranger must not be able to lock the real member out of their account."""
+    store.create_member("rpf@funston.com", "Richard", "8983498131")
 
     for _ in range(LOGIN_MAX_FAILURES + 1):
         _try(client, "wrong", ip="10.9.9.9")
@@ -332,7 +332,7 @@ def test_throttling_does_not_lock_out_a_different_address(client, store):
 
 
 def test_a_successful_login_clears_the_failures(client, store):
-    store.create_paddler("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "8983498131")
 
     for _ in range(LOGIN_MAX_FAILURES - 1):
         _try(client, "wrong")
@@ -345,7 +345,7 @@ def test_a_successful_login_clears_the_failures(client, store):
 
 
 def test_a_failed_login_is_logged(client, store, caplog):
-    store.create_paddler("rpf@funston.com", "Richard", "pw")
+    store.create_member("rpf@funston.com", "Richard", "pw")
     with caplog.at_level("WARNING"):
         _try(client, "wrong")
     assert any("rpf@funston.com" in r.message for r in caplog.records)

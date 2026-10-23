@@ -1,4 +1,4 @@
-"""Derive paddling-session statistics from a parsed FIT activity.
+"""Derive session statistics from a parsed FIT activity.
 
 Everything here works in SI units (metres, metres/second, seconds). The
 browser layer is responsible for km/h and min/km presentation.

@@ -2,7 +2,7 @@
 
 Upload a `.fit` file straight from your phone and get a full session report for
 it: a speed histogram, a speed trace with a rolling average, and the overall
-averages and maxima that actually matter for a paddling session.
+averages and maxima that actually matter for a training session.
 
 Built for Wahoo ELEMNT recordings, works with anything that writes a standard
 FIT activity file (Garmin, Suunto, Coros, phone apps).
@@ -120,38 +120,38 @@ dynamic-DNS name rather than a literal address.
 | `SDA_MAX_UPLOAD_BYTES` | `67108864` (64 MB) | Per-request upload ceiling |
 | `SDA_SECRET_KEY` | generated into `$SDA_DATA_DIR/secret_key` | Session-cookie signing key |
 | `SDA_BASE_PATH` | *(empty)* | Prefix, if you are not using `X-Forwarded-Prefix` |
-| `SDA_INITIAL_PADDLER_EMAIL` | *(unset)* | First admin, created only when there are no paddlers |
-| `SDA_INITIAL_PADDLER_NAME` | *(unset)* | …their display name |
-| `SDA_INITIAL_PADDLER_PASSWORD` | *(unset)* | …their password. Never commit it |
+| `SDA_INITIAL_MEMBER_EMAIL` | *(unset)* | First admin, created only when there are no members |
+| `SDA_INITIAL_MEMBER_NAME` | *(unset)* | …their display name |
+| `SDA_INITIAL_MEMBER_PASSWORD` | *(unset)* | …their password. Never commit it |
 
 ## Accounts
 
-Every page except `/healthz` needs a signed-in paddler. A session is a *shared*
-record: it carries a list of paddlers, and each paddler sees only the sessions
-they are linked to. A two-paddler canoe is one session linked twice.
+Every page except `/healthz` needs a signed-in member. A session is a *shared*
+record: it carries a list of members, and each member sees only the sessions
+they are linked to. A two-member canoe is one session linked twice.
 
-Create the first paddler on a live host:
+Create the first member on a live host:
 
 ```bash
 cd /opt/sport-data-analyzer
-SDA_INITIAL_PADDLER_PASSWORD='…' .venv/bin/python -m app.cli create-paddler \
+SDA_INITIAL_MEMBER_PASSWORD='…' .venv/bin/python -m app.cli create-member \
     --email you@example.com --name 'Your Name' --admin
 ```
 
 Or let a fresh install bootstrap itself from the three
-`SDA_INITIAL_PADDLER_*` variables above. That runs **only** when the users table
+`SDA_INITIAL_MEMBER_*` variables above. That runs **only** when the users table
 is empty, so a restart can never resurrect a deleted account or reset a password.
 
-After that an admin manages everyone at `/admin/paddlers`: create paddlers,
-change passwords, promote or deactivate. Each report page carries a paddlers card
+After that an admin manages everyone at `/admin/members`: create members,
+change passwords, promote or deactivate. Each report page carries a members card
 for sharing that session with someone else.
 
 Seven things worth knowing:
 
-- **A password change signs that paddler out everywhere.** The cookie carries a
+- **A password change signs that member out everywhere.** The cookie carries a
   `session_epoch`; changing the password bumps it, so a stolen cookie does not
   outlive the password it belonged to.
-- **Deactivating a paddler takes effect on their next request**, not at their
+- **Deactivating a member takes effect on their next request**, not at their
   next sign-in — the row is re-read every request rather than trusted from the
   cookie.
 - **The last active admin cannot be demoted or deactivated.** That would lock
@@ -161,14 +161,14 @@ Seven things worth knowing:
 - **Failed sign-ins are throttled per account *and* per address.** Five failures
   from one address against one account inside fifteen minutes answer `429`. Keyed
   on the pair rather than either alone: address alone lets a shared NAT lock out
-  everyone behind it, and email alone lets a stranger lock a known paddler out of
+  everyone behind it, and email alone lets a stranger lock a known member out of
   their own account. The count lives in SQLite, not in memory — gunicorn runs two
   workers with no `--preload`, so an in-process counter would hand an attacker
   twice the attempts and forget on every restart.
-- **Deactivating the last paddler on a session re-homes it, not orphans it.** The
+- **Deactivating the last member on a session re-homes it, not orphans it.** The
   sessions that would otherwise become invisible to every account are reassigned
   to the admin doing the deactivating, and the screen says how many. The same
-  dead end is why removing the last paddler from a session is refused outright.
+  dead end is why removing the last member from a session is refused outright.
 - **A write from another site is refused.** A `POST` whose `Origin` (or
   `Referer`) names a different host answers `403`, across the whole app — login,
   upload, delete, sharing and the admin screen. `SameSite=Lax` already stops the
@@ -202,11 +202,11 @@ way to end that session for good is to **change the password**, which bumps
 | `GET` | `/a/<id>` | The report page |
 | `GET` | `/a/<id>/download` | The original `.fit`, byte for byte |
 | `POST` | `/api/a/<id>/delete` | Delete the session |
-| `POST` | `/api/a/<id>/paddlers` | `{"add": id}` or `{"remove": id}` — share the session |
-| `GET` | `/admin/paddlers` | Admin: list, create, change passwords |
-| `POST` | `/admin/paddlers/new` | Admin: create a paddler |
-| `POST` | `/admin/paddlers/<id>/password` | Admin: set a new password |
-| `POST` | `/admin/paddlers/<id>/update` | Admin: rename, promote, deactivate |
+| `POST` | `/api/a/<id>/members` | `{"add": id}` or `{"remove": id}` — share the session |
+| `GET` | `/admin/members` | Admin: list, create, change passwords |
+| `POST` | `/admin/members/new` | Admin: create a member |
+| `POST` | `/admin/members/<id>/password` | Admin: set a new password |
+| `POST` | `/admin/members/<id>/update` | Admin: rename, promote, deactivate |
 | `GET` | `/healthz` | Liveness. Public, so it reports nothing else |
 
 Everything except `/login` and `/healthz` requires a session. `/admin/*` also
@@ -215,7 +215,7 @@ redirect to `/login` rather than a `403` that would confirm the route exists.
 
 Re-uploading a file you already have is detected by SHA-256 and returns the
 existing report instead of a duplicate — **and links the uploader to it**, so the
-second paddler in a canoe adding the same file from their own watch sees the
+second member in a canoe adding the same file from their own watch sees the
 session rather than being told it is a duplicate.
 
 ## How the stats are computed
@@ -228,7 +228,7 @@ The interesting decisions, all of which have tests:
 - **Auto-pause.** Wahoo devices stop writing records when you stop, which
   leaves multi-minute holes in the timestamps. Each sample's duration is capped
   at three times the recording cadence, so a 42-minute coffee stop is not
-  credited as paddling. Without this, moving time came out ~18% too high on a
+  credited as moving time. Without this, moving time came out ~18% too high on a
   real ELEMNT file.
 - **Missing fields.** Speed is recovered from the distance delta when a device
   omits it, and distance is integrated from speed when a device never recorded
@@ -252,16 +252,16 @@ The interesting decisions, all of which have tests:
 
 ```
 $SDA_DATA_DIR/
-├── sport.db                        # SQLite: sessions, paddlers, and the links
+├── sport.db                        # SQLite: sessions, members, and the links
 ├── secret_key                      # generated once, mode 0600
 └── uploads/
     ├── <id>.fit                    # the original upload, unmodified
     └── <id>.report.json.gz         # the computed report payload
 ```
 
-Three tables: `activities` (one row per session), `users` (one row per paddler),
-and `activity_paddlers`, the join between them. The join is what makes a session
-shared — a canoe with two paddlers is one activity linked twice, and a paddler
+Three tables: `activities` (one row per session), `users` (one row per member),
+and `activity_members`, the join between them. The join is what makes a session
+shared — a canoe with two members is one activity linked twice, and a member
 sees exactly the activities they are linked to.
 
 `users.email` is declared `COLLATE NOCASE`. SQLite's default `TEXT` collation is
@@ -283,7 +283,7 @@ python -m pytest            # 288 tests
 Coverage includes unit tests for every derived statistic, decoder tests against
 a synthetic canoeing session and a real 13,471-record Wahoo ELEMNT ride,
 end-to-end tests of upload, dedupe, report rendering, deletion and rebuilding,
-and the account model: password hashing, the session epoch, per-paddler
+and the account model: password hashing, the session epoch, per-member
 visibility (including the 404 for an unlinked session), the admin screen's
 lockout guards, the CLI, and that the backfill is wired into the app factory
 rather than merely available in the store.
@@ -291,7 +291,7 @@ rather than merely available in the store.
 Two fixtures live in `tests/fixtures/`:
 
 - `canoe-session.fit` — synthetic, deterministic, generated by
-  `tools/make_sample_fit.py` (26 min paddling session with a drink stop)
+  `tools/make_sample_fit.py` (26 min session with a drink stop)
 - `real-wahoo-elemnt.fit` — a real Wahoo ELEMNT ride, used as a regression test
   for the decoder and the auto-pause handling
 

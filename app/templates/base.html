@@ -16,10 +16,10 @@
       <span>Sport Data Analyzer</span>
     </a>
     <nav class="topnav">
-      {% set me = current_paddler() %}
+      {% set me = current_member() %}
       {% if me %}
         {% if me.is_admin %}
-        <a class="link-muted" href="{{ url_for('sda.admin_paddlers') }}">paddlers</a>
+        <a class="link-muted" href="{{ url_for('sda.admin_members') }}">members</a>
         {% endif %}
         <span class="who" title="{{ me.email }}">{{ me.name }}</span>
         <form method="post" action="{{ url_for('sda.logout') }}" class="inline-form">

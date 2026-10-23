@@ -1,5 +1,10 @@
 # Paddler Accounts Implementation Plan
 
+> **Terminology note, added 2026-10-21.** Left as written — it records the plan
+> as it was executed. "Paddler" was later renamed to "member" in the code and the
+> UI. The FIT sport names (`paddling`, `stand_up_paddleboarding`) are unaffected.
+> The renamed file is `app/templates/admin_members.html`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the sport data analyzer real per-person accounts, where each session carries a list of paddlers and a signed-in paddler sees only the sessions they are linked to.

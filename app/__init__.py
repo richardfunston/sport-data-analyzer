@@ -15,7 +15,7 @@ __all__ = ["create_app"]
 
 
 def _bootstrap_first_admin(store: Store, app: Flask) -> None:
-    """Create the first admin from the environment when there are no paddlers.
+    """Create the first admin from the environment when there are no members.
 
     The first account's password is deliberately not in the repository, so a
     fresh clone takes it from the environment. This fires **only** when the
@@ -25,12 +25,12 @@ def _bootstrap_first_admin(store: Store, app: Flask) -> None:
     Silently does nothing unless all three variables are set and the email is
     usable; a typo must not create an account nobody can sign in as.
     """
-    if store.list_paddlers():
+    if store.list_members():
         return
 
-    email = (os.environ.get("SDA_INITIAL_PADDLER_EMAIL") or "").strip()
-    name = (os.environ.get("SDA_INITIAL_PADDLER_NAME") or "").strip()
-    password = os.environ.get("SDA_INITIAL_PADDLER_PASSWORD") or ""
+    email = (os.environ.get("SDA_INITIAL_MEMBER_EMAIL") or "").strip()
+    name = (os.environ.get("SDA_INITIAL_MEMBER_NAME") or "").strip()
+    password = os.environ.get("SDA_INITIAL_MEMBER_PASSWORD") or ""
     if not (email and name and password):
         return
 
@@ -38,13 +38,13 @@ def _bootstrap_first_admin(store: Store, app: Flask) -> None:
 
     if not usable_email(email):
         app.logger.warning(
-            "SDA_INITIAL_PADDLER_EMAIL is not a usable address; skipping the "
-            "first-paddler bootstrap"
+            "SDA_INITIAL_MEMBER_EMAIL is not a usable address; skipping the "
+            "first-member bootstrap"
         )
         return
 
-    store.create_paddler(email, name, password, is_admin=True)
-    app.logger.info("created the first paddler %s from the environment", email)
+    store.create_member(email, name, password, is_admin=True)
+    app.logger.info("created the first member %s from the environment", email)
 
 
 def create_app(config_object: type[Config] = Config) -> Flask:
@@ -79,7 +79,7 @@ def create_app(config_object: type[Config] = Config) -> Flask:
 
     app.session_interface = SchemeAwareSession()
 
-    # Adopt any activity that has no paddler at all. Unconditional and
+    # Adopt any activity that has no member at all. Unconditional and
     # idempotent, on every startup: an unowned session is invisible to every
     # account, which is indistinguishable from having lost it. Gating this on
     # an empty users table would skip it on the rollout path, where the first
@@ -87,16 +87,16 @@ def create_app(config_object: type[Config] = Config) -> Flask:
     _bootstrap_first_admin(store, app)
     admin = store.first_admin()
     if admin is not None:
-        store.backfill_paddlers(admin["id"])
+        store.backfill_members(admin["id"])
 
     from .formatting import register_filters
 
     register_filters(app)
 
     # Every template can ask who is signed in, so the header can name them.
-    from .auth import current_paddler
+    from .auth import current_member
 
-    app.jinja_env.globals["current_paddler"] = current_paddler
+    app.jinja_env.globals["current_member"] = current_member
 
     from .routes import bp
 

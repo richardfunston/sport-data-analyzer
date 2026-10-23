@@ -22,10 +22,10 @@ from .auth import (
     LOGIN_MAX_FAILURES,
     LOGIN_WINDOW_SECONDS,
     admin_required,
-    current_paddler,
-    login_paddler,
+    current_member,
+    login_member,
     login_required,
-    logout_paddler,
+    logout_member,
     usable_email,
 )
 from .basemaps import BASEMAPS
@@ -120,7 +120,7 @@ def login():
                 429,
             )
 
-        user = store.verify_paddler(email, request.form.get("password", ""))
+        user = store.verify_member(email, request.form.get("password", ""))
         if user is None:
             store.record_login_failure(email, address)
             # Logged so a run of failures is visible rather than silent. The
@@ -133,7 +133,7 @@ def login():
             error = "That email and password combination is incorrect."
         else:
             store.clear_login_failures(email, address)
-            login_paddler(user)
+            login_member(user)
             return redirect(_safe_next(next_target))
 
     return render_template("login.html", error=error, email=email, next=next_target)
@@ -142,7 +142,7 @@ def login():
 @bp.post("/logout")
 def logout():
     """Sign out. Harmless when already signed out."""
-    logout_paddler()
+    logout_member()
     return redirect(url_for("sda.login"))
 
 
@@ -150,13 +150,13 @@ def logout():
 @login_required
 def index():
     store = _store()
-    paddler = current_paddler()
+    member = current_member()
     return render_template(
         "index.html",
-        activities=store.list_for(paddler["id"], 60),
+        activities=store.list_for(member["id"], 60),
         # Scoped, not global: a deployment-wide number above a filtered list
         # reads as a bug to the person looking at it.
-        count=store.count_for(paddler["id"]),
+        count=store.count_for(member["id"]),
     )
 
 
@@ -168,7 +168,7 @@ def upload():
     if not files:
         return jsonify({"error": "no files were uploaded"}), 400
 
-    uploader_id = current_paddler()["id"]
+    uploader_id = current_member()["id"]
     results: list[dict[str, Any]] = []
     for upload_file in files:
         name = upload_file.filename or "upload.fit"
@@ -229,9 +229,9 @@ def _rebuild_report(store, activity_id: str) -> dict[str, Any] | None:
 @login_required
 def activity(activity_id: str):
     store = _store()
-    # get_for, not get: an unlinked paddler gets a 404 and cannot confirm the id
+    # get_for, not get: an unlinked member gets a 404 and cannot confirm the id
     # exists. A 403 would tell them it does.
-    record = store.get_for(activity_id, current_paddler()["id"])
+    record = store.get_for(activity_id, current_member()["id"])
     if record is None:
         abort(404, description="no such activity")
 
@@ -248,9 +248,9 @@ def activity(activity_id: str):
         record=record,
         report=report,
         basemaps=BASEMAPS,
-        paddlers=store.paddlers_for(activity_id),
-        shareable=_paddler_choices(store, activity_id),
-        me=current_paddler(),
+        members=store.members_for(activity_id),
+        shareable=_member_choices(store, activity_id),
+        me=current_member(),
     )
 
 
@@ -258,7 +258,7 @@ def activity(activity_id: str):
 @login_required
 def download(activity_id: str):
     store = _store()
-    record = store.get_for(activity_id, current_paddler()["id"])
+    record = store.get_for(activity_id, current_member()["id"])
     if record is None:
         abort(404)
     return send_file(
@@ -273,32 +273,32 @@ def download(activity_id: str):
 @login_required
 def delete(activity_id: str):
     store = _store()
-    if store.get_for(activity_id, current_paddler()["id"]) is None:
+    if store.get_for(activity_id, current_member()["id"]) is None:
         abort(404)
     if not store.delete(activity_id):
         abort(404)
     return jsonify({"ok": True})
 
 
-def _paddler_choices(store, activity_id: str) -> list[dict[str, Any]]:
-    """Active paddlers not already on this session."""
-    linked = {p["id"] for p in store.paddlers_for(activity_id)}
+def _member_choices(store, activity_id: str) -> list[dict[str, Any]]:
+    """Active members not already on this session."""
+    linked = {p["id"] for p in store.members_for(activity_id)}
     return [
-        p for p in store.list_paddlers() if p["is_active"] and p["id"] not in linked
+        p for p in store.list_members() if p["is_active"] and p["id"] not in linked
     ]
 
 
-@bp.post("/api/a/<activity_id>/paddlers")
+@bp.post("/api/a/<activity_id>/members")
 @login_required
-def session_paddlers(activity_id: str):
+def session_members(activity_id: str):
     """Share a session, or stop sharing it.
 
-    Any paddler already linked may do this: a shared session behaves like a
+    Any member already linked may do this: a shared session behaves like a
     shared document, and the group is a household or club. Someone not linked
     gets a 404 - they cannot tell the session exists, let alone edit it.
     """
     store = _store()
-    if store.get_for(activity_id, current_paddler()["id"]) is None:
+    if store.get_for(activity_id, current_member()["id"]) is None:
         abort(404)
 
     payload = request.get_json(silent=True) or {}
@@ -306,24 +306,24 @@ def session_paddlers(activity_id: str):
     remove = payload.get("remove")
 
     if add:
-        if store.get_paddler(add) is None:
-            return jsonify({"error": "no such paddler"}), 400
-        store.link_paddler(activity_id, add)
+        if store.get_member(add) is None:
+            return jsonify({"error": "no such member"}), 400
+        store.link_member(activity_id, add)
     elif remove:
-        if len(store.paddlers_for(activity_id)) <= 1:
-            # Refused rather than allowed: a session with no paddler is
+        if len(store.members_for(activity_id)) <= 1:
+            # Refused rather than allowed: a session with no member is
             # invisible to everyone, which is indistinguishable from lost.
-            return jsonify({"error": "a session must keep at least one paddler"}), 400
-        store.unlink_paddler(activity_id, remove)
+            return jsonify({"error": "a session must keep at least one member"}), 400
+        store.unlink_member(activity_id, remove)
     else:
         return jsonify({"error": "expected 'add' or 'remove'"}), 400
 
     return jsonify(
         {
             "ok": True,
-            "paddlers": [
+            "members": [
                 {"id": p["id"], "name": p["name"], "email": p["email"]}
-                for p in store.paddlers_for(activity_id)
+                for p in store.members_for(activity_id)
             ],
         }
     )
@@ -335,9 +335,9 @@ def session_paddlers(activity_id: str):
 def _render_admin(store, *, error=None, notice=None, form=None, status=200):
     return (
         render_template(
-            "admin_paddlers.html",
-            paddlers=store.list_paddlers(),
-            me=current_paddler(),
+            "admin_members.html",
+            members=store.list_members(),
+            me=current_member(),
             error=error,
             notice=notice,
             form=form or {},
@@ -351,9 +351,9 @@ def _usable_email(candidate: str) -> bool:
     return usable_email(candidate)
 
 
-@bp.get("/admin/paddlers")
+@bp.get("/admin/members")
 @admin_required
-def admin_paddlers():
+def admin_members():
     return _render_admin(
         _store(),
         error=request.args.get("error"),
@@ -361,9 +361,9 @@ def admin_paddlers():
     )
 
 
-@bp.post("/admin/paddlers/new")
+@bp.post("/admin/members/new")
 @admin_required
-def admin_paddler_new():
+def admin_member_new():
     store = _store()
     name = (request.form.get("name") or "").strip()
     email = (request.form.get("email") or "").strip()
@@ -380,7 +380,7 @@ def admin_paddler_new():
         return _render_admin(store, error="A password is required.", form=form)
 
     try:
-        store.create_paddler(
+        store.create_member(
             email,
             name,
             password,
@@ -389,18 +389,18 @@ def admin_paddler_new():
     except DuplicateEmail:
         return _render_admin(
             store,
-            error="There is already a paddler with that email address.",
+            error="There is already a member with that email address.",
             form=form,
         )
 
-    return redirect(url_for("sda.admin_paddlers", notice=f"{name} can sign in now."))
+    return redirect(url_for("sda.admin_members", notice=f"{name} can sign in now."))
 
 
-@bp.post("/admin/paddlers/<user_id>/password")
+@bp.post("/admin/members/<user_id>/password")
 @admin_required
-def admin_paddler_password(user_id: str):
+def admin_member_password(user_id: str):
     store = _store()
-    target = store.get_paddler(user_id)
+    target = store.get_member(user_id)
     if target is None:
         abort(404)
 
@@ -409,18 +409,18 @@ def admin_paddler_password(user_id: str):
         return _render_admin(store, error="A password is required.")
 
     # set_password bumps session_epoch, so this evicts every session already
-    # open for that paddler rather than leaving a stale cookie valid.
+    # open for that member rather than leaving a stale cookie valid.
     store.set_password(user_id, password)
     return redirect(
-        url_for("sda.admin_paddlers", notice=f"Password changed for {target['name']}.")
+        url_for("sda.admin_members", notice=f"Password changed for {target['name']}.")
     )
 
 
-@bp.post("/admin/paddlers/<user_id>/update")
+@bp.post("/admin/members/<user_id>/update")
 @admin_required
-def admin_paddler_update(user_id: str):
+def admin_member_update(user_id: str):
     store = _store()
-    target = store.get_paddler(user_id)
+    target = store.get_member(user_id)
     if target is None:
         abort(404)
 
@@ -445,7 +445,7 @@ def admin_paddler_update(user_id: str):
 
     if fields:
         try:
-            store.update_paddler_safely(user_id, **fields)
+            store.update_member_safely(user_id, **fields)
         except LastAdminError:
             abort(
                 400,
@@ -458,11 +458,11 @@ def admin_paddler_update(user_id: str):
     notice = f"{target['name']} updated."
 
     if fields.get("is_active") is False:
-        # Deactivating the only paddler on a session reaches the same dead end
-        # that removing the last paddler is refused for: the sessions go
+        # Deactivating the only member on a session reaches the same dead end
+        # that removing the last member is refused for: the sessions go
         # invisible to every account, and the link row survives so the startup
         # backfill would not rescue them either. Re-home them instead.
-        moved = store.backfill_paddlers(current_paddler()["id"])
+        moved = store.backfill_members(current_member()["id"])
         if moved:
             plural = "" if moved == 1 else "s"
             notice = (
@@ -470,7 +470,7 @@ def admin_paddler_update(user_id: str):
                 "to you, because nobody active was left on them."
             )
 
-    return redirect(url_for("sda.admin_paddlers", notice=notice))
+    return redirect(url_for("sda.admin_members", notice=notice))
 
 
 @bp.get("/healthz")

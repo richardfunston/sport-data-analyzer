@@ -1,5 +1,13 @@
 # Paddler accounts and per-person session visibility
 
+> **Terminology note, added 2026-10-21.** This document is left as written: it
+> records what was decided when it was decided. The account model it calls a
+> "paddler" was later renamed to a "member" throughout the code and the UI, after
+> Apple devices began flagging the site. The FIT **sport** names it relies on
+> (`paddling`, `stand_up_paddleboarding`) are untouched and still appear, because
+> they describe what the athlete actually did rather than what an account is
+> called.
+
 Date: 2026-10-21
 Status: proposed — awaiting approval
 

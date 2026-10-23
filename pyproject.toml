@@ -1,7 +1,7 @@
 [project]
 name = "sport-data-analyzer"
 version = "1.0.0"
-description = "Upload Wahoo/Garmin .fit files from your phone and get a full paddling-session report."
+description = "Upload Wahoo/Garmin .fit files from your phone and get a full training session report."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

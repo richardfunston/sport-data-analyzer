@@ -74,20 +74,20 @@
   <p class="subtitle" id="track-note" style="margin:10px 0 0"></p>
 </div>
 
-<div class="card" id="paddlers-card">
-  <h3>Paddlers</h3>
+<div class="card" id="members-card">
+  <h3>Members</h3>
   <p class="subtitle" style="margin:0 0 10px">
     Everyone listed can see this session and share it with others.
   </p>
 
-  <ul class="paddler-list" id="paddler-list"
-      data-paddler-url="{{ url_for('sda.session_paddlers', activity_id=record.id) }}">
-    {% for p in paddlers %}
-    <li class="paddler">
-      <span class="paddler-name">{{ p.name }}</span>
-      <span class="paddler-email">{{ p.email }}</span>
+  <ul class="member-list" id="member-list"
+      data-member-url="{{ url_for('sda.session_members', activity_id=record.id) }}">
+    {% for p in members %}
+    <li class="member">
+      <span class="member-name">{{ p.name }}</span>
+      <span class="member-email">{{ p.email }}</span>
       {% if p.id == me.id %}<span class="tag">you</span>{% endif %}
-      {% if paddlers | length > 1 %}
+      {% if members | length > 1 %}
       <button class="btn ghost small" data-remove="{{ p.id }}">remove</button>
       {% endif %}
     </li>
@@ -95,13 +95,13 @@
   </ul>
 
   {% if shareable %}
-  <div class="actions paddler-add">
-    <select id="paddler-to-add" aria-label="Paddler to add">
+  <div class="actions member-add">
+    <select id="member-to-add" aria-label="Member to add">
       {% for p in shareable %}
       <option value="{{ p.id }}">{{ p.name }} — {{ p.email }}</option>
       {% endfor %}
     </select>
-    <button class="btn small" id="add-paddler-btn">Add paddler</button>
+    <button class="btn small" id="add-member-btn">Add member</button>
   </div>
   {% else %}
   <p class="subtitle" style="margin:12px 0 0">Everyone already has this session.</p>

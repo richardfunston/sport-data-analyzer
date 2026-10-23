@@ -85,25 +85,25 @@ def saved_activity(store):
 
 
 def sign_in(client, user):
-    """Put a paddler's session on a test client and hand it back."""
+    """Put a member's session on a test client and hand it back."""
     with client.session_transaction() as sess:
         sess["user_id"] = user["id"]
         sess["epoch"] = int(user["session_epoch"])
-    client.paddler = user
+    client.member = user
     return client
 
 
 @pytest.fixture()
 def signed_in(client, store):
-    """A client already carrying a session for a fresh, non-admin paddler."""
-    return sign_in(client, store.create_paddler("a@funston.com", "A", "pw"))
+    """A client already carrying a session for a fresh, non-admin member."""
+    return sign_in(client, store.create_member("a@funston.com", "A", "pw"))
 
 
 @pytest.fixture()
 def admin_client(client, store):
     """The same, for an admin."""
     return sign_in(
-        client, store.create_paddler("admin@funston.com", "Admin", "pw", is_admin=True)
+        client, store.create_member("admin@funston.com", "Admin", "pw", is_admin=True)
     )
 
 
