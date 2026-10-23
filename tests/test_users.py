@@ -16,12 +16,12 @@ from conftest import minimal_report
 
 def test_create_and_fetch_member(store):
     user = store.create_member(
-        "rpf@funston.com", "Richard Funston", "8983498131", is_admin=True
+        "rpf@funston.com", "Richard Funston", "not-a-real-password", is_admin=True
     )
     assert user["email"] == "rpf@funston.com"
     assert user["name"] == "Richard Funston"
     assert user["is_admin"] == 1
-    assert user["password_hash"] != "8983498131"
+    assert user["password_hash"] != "not-a-real-password"
     assert store.get_member_by_email("rpf@funston.com")["id"] == user["id"]
     assert store.get_member(user["id"])["name"] == "Richard Funston"
 
@@ -44,11 +44,11 @@ def test_duplicate_email_rejected(store):
 
 
 def test_verify_member(store):
-    store.create_member("rpf@funston.com", "Richard", "8983498131")
-    assert store.verify_member("rpf@funston.com", "8983498131") is not None
-    assert store.verify_member(" RPF@Funston.com ", "8983498131") is not None
+    store.create_member("rpf@funston.com", "Richard", "not-a-real-password")
+    assert store.verify_member("rpf@funston.com", "not-a-real-password") is not None
+    assert store.verify_member(" RPF@Funston.com ", "not-a-real-password") is not None
     assert store.verify_member("rpf@funston.com", "wrong") is None
-    assert store.verify_member("nobody@funston.com", "8983498131") is None
+    assert store.verify_member("nobody@funston.com", "not-a-real-password") is None
 
 
 def test_verify_rejects_a_deactivated_member(store):

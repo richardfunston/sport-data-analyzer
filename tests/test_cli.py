@@ -32,7 +32,7 @@ def test_the_cli_creates_a_member(tmp_path, capsys):
             "create-member",
             "--email", "rpf@funston.com",
             "--name", "Richard",
-            "--password", "8983498131",
+            "--password", "not-a-real-password",
             "--admin",
             "--data-dir", str(data),
         ]
@@ -44,7 +44,7 @@ def test_the_cli_creates_a_member(tmp_path, capsys):
     assert user is not None
     assert user["name"] == "Richard"
     assert user["is_admin"] == 1
-    assert store.verify_member("rpf@funston.com", "8983498131") is not None
+    assert store.verify_member("rpf@funston.com", "not-a-real-password") is not None
 
 
 def test_the_cli_creates_a_plain_member_without_admin(tmp_path):
@@ -156,7 +156,7 @@ def test_a_fresh_install_can_bootstrap_its_first_admin(tmp_path, monkeypatch):
         monkeypatch,
         email="rpf@funston.com",
         name="Richard",
-        password="8983498131",
+        password="not-a-real-password",
     )
     data = tmp_path / "data"
 
@@ -166,7 +166,7 @@ def test_a_fresh_install_can_bootstrap_its_first_admin(tmp_path, monkeypatch):
     richard = store.get_member_by_email("rpf@funston.com")
     assert richard is not None
     assert richard["is_admin"] == 1
-    assert store.verify_member("rpf@funston.com", "8983498131") is not None
+    assert store.verify_member("rpf@funston.com", "not-a-real-password") is not None
 
 
 def test_the_bootstrap_does_nothing_without_the_variables(tmp_path, monkeypatch):
@@ -184,7 +184,7 @@ def test_the_bootstrap_does_not_fire_once_a_member_exists(tmp_path, monkeypatch)
     Store(data).create_member("someone@funston.com", "Someone", "their-own-pw")
 
     _bootstrap_env(
-        monkeypatch, email="rpf@funston.com", name="Richard", password="8983498131"
+        monkeypatch, email="rpf@funston.com", name="Richard", password="not-a-real-password"
     )
     create_app(_config_for(data))
 

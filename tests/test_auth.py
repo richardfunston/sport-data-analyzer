@@ -33,9 +33,9 @@ from app.storage import Store
 
 
 def test_password_roundtrip():
-    digest = hash_password("8983498131")
-    assert digest != "8983498131"
-    assert check_password("8983498131", digest) is True
+    digest = hash_password("not-a-real-password")
+    assert digest != "not-a-real-password"
+    assert check_password("not-a-real-password", digest) is True
     assert check_password("8983498132", digest) is False
 
 
@@ -197,9 +197,9 @@ def test_login_page_renders(client):
 
 
 def test_login_with_correct_credentials_redirects_to_the_index(client, store):
-    store.create_member("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "not-a-real-password")
     response = client.post(
-        "/login", data={"email": "rpf@funston.com", "password": "8983498131"}
+        "/login", data={"email": "rpf@funston.com", "password": "not-a-real-password"}
     )
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/")
@@ -311,37 +311,37 @@ def _try(client, password, email="rpf@funston.com", ip=None):
 def test_repeated_failures_are_throttled(client, store):
     """The admin password is ten numeric digits, so an unthrottled public login
     is 10^10 guesses away from the account."""
-    store.create_member("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "not-a-real-password")
 
     for _ in range(LOGIN_MAX_FAILURES):
         assert _try(client, "wrong").status_code == 200
 
-    blocked = _try(client, "8983498131")
+    blocked = _try(client, "not-a-real-password")
     assert blocked.status_code == 429
     assert b"too many" in blocked.data.lower()
 
 
 def test_throttling_does_not_lock_out_a_different_address(client, store):
     """A stranger must not be able to lock the real member out of their account."""
-    store.create_member("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "not-a-real-password")
 
     for _ in range(LOGIN_MAX_FAILURES + 1):
         _try(client, "wrong", ip="10.9.9.9")
 
-    assert _try(client, "8983498131", ip="10.1.1.1").status_code == 302
+    assert _try(client, "not-a-real-password", ip="10.1.1.1").status_code == 302
 
 
 def test_a_successful_login_clears_the_failures(client, store):
-    store.create_member("rpf@funston.com", "Richard", "8983498131")
+    store.create_member("rpf@funston.com", "Richard", "not-a-real-password")
 
     for _ in range(LOGIN_MAX_FAILURES - 1):
         _try(client, "wrong")
-    assert _try(client, "8983498131").status_code == 302
+    assert _try(client, "not-a-real-password").status_code == 302
 
     # The slate is clean, so a fresh run of failures is needed to throttle again.
     for _ in range(LOGIN_MAX_FAILURES - 1):
         assert _try(client, "wrong").status_code == 200
-    assert _try(client, "8983498131").status_code == 302
+    assert _try(client, "not-a-real-password").status_code == 302
 
 
 def test_a_failed_login_is_logged(client, store, caplog):
