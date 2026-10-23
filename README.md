@@ -298,11 +298,22 @@ stored inside each payload; opening a report written by an older version of the
 analysis regenerates it from the original `.fit` file and rewrites the cache, so
 improving a statistic upgrades sessions you uploaded months ago.
 
+## Requirements
+
+[`docs/requirements.md`](docs/requirements.md) is the functional specification:
+29 numbered requirements, the user stories behind them, acceptance criteria for
+each, and the test that verifies every criterion.
+
+It is enforced rather than aspirational. `tests/test_requirements.py` fails the
+build if the document cites a test that does not exist, if any test in the suite
+is not cited by some requirement, or if the summary table disagrees with the body.
+Adding a test therefore means saying which requirement it proves.
+
 ## Tests
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest            # 288 tests
+python -m pytest
 ```
 
 Coverage includes unit tests for every derived statistic, decoder tests against
